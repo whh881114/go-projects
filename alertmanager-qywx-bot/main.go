@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"os"
@@ -43,6 +44,25 @@ func formatMessage(alert WebhookAlert) string {
 	return buf.String()
 }
 
+func init() {
+	loc, _ := time.LoadLocation("Asia/Shanghai")
+	log.SetFlags(0)
+	log.SetOutput(logWriterWithZone(loc))
+}
+
+func logWriterWithZone(loc *time.Location) io.Writer {
+	return &logWriter{loc: loc}
+}
+
+type logWriter struct {
+	loc *time.Location
+}
+
+func (lw *logWriter) Write(p []byte) (n int, err error) {
+	timestamp := time.Now().In(lw.loc).Format("2006-01-02 15:04:05")
+	return fmt.Fprintf(os.Stdout, "[%s] %s", timestamp, p)
+}
+
 // alertHandler handles incoming webhook alerts and forwards them to a WeChat robot webhook URL.
 func alertHandler(w http.ResponseWriter, r *http.Request) {
 	robotID := strings.TrimPrefix(r.URL.Path, "/")
@@ -52,8 +72,17 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
+	bodyBytes, err := io.ReadAll(r.Body)
+	if err != nil {
+		http.Error(w, "failed to read body", http.StatusBadRequest)
+		log.Printf("❌ 无法读取请求体: %v\n", err)
+		return
+	}
+
 	var alert WebhookAlert
-	if err := json.NewDecoder(r.Body).Decode(&alert); err != nil {
+	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
+		log.Printf("📦 原始请求体: %s\n", string(bodyBytes))
+		log.Printf("📬 请求头: %+v\n", r.Header)
 		http.Error(w, "invalid alert data", http.StatusBadRequest)
 		log.Printf("❌ 解码告警数据失败: %v\n", err)
 		return
