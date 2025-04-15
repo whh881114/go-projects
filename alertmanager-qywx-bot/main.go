@@ -31,12 +31,12 @@ func formatMessage(alert WebhookAlert) []string {
 		var buf strings.Builder
 
 		if a.Status == "resolved" {
-			buf.WriteString(fmt.Sprintf("✅ 收到恢复信息\n"))
+			buf.WriteString(fmt.Sprintf("✅✅✅ 收到恢复信息\n"))
 		} else {
-			buf.WriteString(fmt.Sprintf("📣 收到告警信息\n"))
+			buf.WriteString(fmt.Sprintf("📣📣📣 收到告警信息\n"))
 		}
 
-		buf.WriteString("----------------------\n")
+		buf.WriteString("----------------------------\n")
 		buf.WriteString(fmt.Sprintf("🚨 状态: %s\n", a.Status))
 		buf.WriteString(fmt.Sprintf("🔔 名称: %s\n", a.Labels["alertname"]))
 		buf.WriteString(fmt.Sprintf("📛 级别: %s\n", a.Labels["severity"]))
