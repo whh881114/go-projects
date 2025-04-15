@@ -30,9 +30,9 @@ func formatMessage(alert WebhookAlert) []string {
 	for _, a := range alert.Alerts {
 		var buf strings.Builder
 		if a.Status == "resolved" {
-			buf.WriteString(fmt.Sprintf("<font color=\"info\">**【监控告警通知】 ✅✅✅【恢复】✅✅✅**</font>\n"))
+			buf.WriteString(fmt.Sprintf("<font color=\"info\">**🌿🌿🌿【监控告警通知】【恢复】🌿🌿🌿**</font>\n"))
 		} else {
-			buf.WriteString(fmt.Sprintf("<font color=\"warning\">**【监控告警通知】 🔥🔥🔥【故障】🔥🔥🔥**</font>\n"))
+			buf.WriteString(fmt.Sprintf("<font color=\"warning\">**🔥🔥🔥【监控告警通知】【故障】🔥🔥🔥**</font>\n"))
 		}
 
 		buf.WriteString("----------------------------\n")
@@ -46,7 +46,7 @@ func formatMessage(alert WebhookAlert) []string {
 		if desc, ok := a.Annotations["description"]; ok {
 			buf.WriteString(fmt.Sprintf("📄 **描述**：%s\n", desc))
 		}
-		buf.WriteString(fmt.Sprintf("🔗 链接: [点击访问查询结果](%s)\n", a.GeneratorURL))
+		buf.WriteString(fmt.Sprintf("🔗 **链接**: [点击访问查询结果](%s)\n", a.GeneratorURL))
 		messages = append(messages, buf.String())
 	}
 	return messages
