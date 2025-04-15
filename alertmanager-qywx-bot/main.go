@@ -144,7 +144,7 @@ func main() {
 		port = p
 	}
 	http.HandleFunc("/", alertHandler)
-	log.Printf("🚀 服务已启动，监听端口 :%s\n", port)
+	log.Printf("🚀 服务已启动，监听端口: %s\n", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("❌ 启动服务失败: %v\n", err)
 	}
