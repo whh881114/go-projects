@@ -29,25 +29,24 @@ func formatMessage(alert WebhookAlert) []string {
 
 	for _, a := range alert.Alerts {
 		var buf strings.Builder
-
 		if a.Status == "resolved" {
-			buf.WriteString(fmt.Sprintf("✅✅✅ 收到恢复信息\n"))
+			buf.WriteString(fmt.Sprintf("<font color=\"info\">**【监控告警通知】 ✅✅✅【恢复】✅✅✅**</font>\n"))
 		} else {
-			buf.WriteString(fmt.Sprintf("📣📣📣 收到告警信息\n"))
+			buf.WriteString(fmt.Sprintf("<font color=\"warning\">**【监控告警通知】 🔥🔥🔥【故障】🔥🔥🔥**</font>\n"))
 		}
 
 		buf.WriteString("----------------------------\n")
-		buf.WriteString(fmt.Sprintf("🚨 状态: %s\n", a.Status))
-		buf.WriteString(fmt.Sprintf("🔔 名称: %s\n", a.Labels["alertname"]))
-		buf.WriteString(fmt.Sprintf("📛 级别: %s\n", a.Labels["severity"]))
-		buf.WriteString(fmt.Sprintf("🕒 开始: %s\n", a.StartsAt.Format("2006-01-02 15:04:05")))
+		buf.WriteString(fmt.Sprintf("🚨 **状态：** %s\n", a.Status))
+		buf.WriteString(fmt.Sprintf("🔔 **名称：** %s\n", a.Labels["alertname"]))
+		buf.WriteString(fmt.Sprintf("📛 **级别：** %s\n", a.Labels["severity"]))
+		buf.WriteString(fmt.Sprintf("🕒 **开始：** %s\n", a.StartsAt.Format("2006-01-02 15:04:05")))
 		if summary, ok := a.Annotations["summary"]; ok {
-			buf.WriteString(fmt.Sprintf("📋 概要: %s\n", summary))
+			buf.WriteString(fmt.Sprintf("📋 **概要**：%s\n", summary))
 		}
 		if desc, ok := a.Annotations["description"]; ok {
-			buf.WriteString(fmt.Sprintf("📄 描述: %s\n", desc))
+			buf.WriteString(fmt.Sprintf("📄 **描述**：%s\n", desc))
 		}
-		buf.WriteString(fmt.Sprintf("🔗 链接: %s\n", a.GeneratorURL))
+		buf.WriteString(fmt.Sprintf("🔗 链接: [点击访问查询结果](%s)\n", a.GeneratorURL))
 		messages = append(messages, buf.String())
 	}
 	return messages
