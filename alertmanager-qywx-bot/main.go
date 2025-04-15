@@ -78,7 +78,7 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("❌ 无法读取请求体: %v\n", err)
 		return
 	} else {
-		log.Printf("✅ 成功读取请求体: %v\n", string(bodyBytes))
+		log.Printf("✅ 原始请求体: %v\n", string(bodyBytes))
 	}
 
 	var alert WebhookAlert
@@ -90,33 +90,22 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	messages := formatMessage(alert)
-	for _, msg := range messages {
-		payload := map[string]interface{}{
-			"msgtype": "markdown",
-			"markdown": map[string]string{
-				"content": msg,
-			},
-		}
+	msg := formatMessage(alert)
 
-		payloadJSON, err := json.Marshal(payload)
-		if err != nil {
-			http.Error(w, "failed to encode payload", http.StatusInternalServerError)
-			log.Printf("❌ 编码Webhook消息失败: %v\n", err)
-			return
-		}
-
-		webhookURL := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=%s", robotID)
-		resp, err := http.Post(webhookURL, "application/json", strings.NewReader(string(payloadJSON)))
-		if err != nil {
-			http.Error(w, "failed to send to WeChat", http.StatusInternalServerError)
-			log.Printf("❌ 发送到企业微信失败: %v\n", err)
-			return
-		}
-		defer resp.Body.Close()
-		respBody, _ := io.ReadAll(resp.Body)
-		log.Printf("✅ 单条告警已发送到机器人 [%s]，状态：%s，响应内容：%s\n", robotID, resp.Status, string(respBody))
+	payload := map[string]interface{}{
+		"msgtype": "markdown",
+		"markdown": map[string]string{
+			"content": msg,
+		},
 	}
+
+	payloadJSON, err := json.Marshal(payload)
+	if err != nil {
+		http.Error(w, "failed to encode payload", http.StatusInternalServerError)
+		log.Printf("❌ 编码Webhook消息失败: %v\n", err)
+		return
+	}
+
 	webhookURL := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=%s", robotID)
 	resp, err := http.Post(webhookURL, "application/json", strings.NewReader(string(payloadJSON)))
 	if err != nil {
@@ -137,7 +126,7 @@ func main() {
 		port = p
 	}
 	http.HandleFunc("/", alertHandler)
-	log.Printf("🚀 服务已启动，监听端口：%s\n", port)
+	log.Printf("🚀 服务已启动，监听端口 :%s\n", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
 		log.Fatalf("❌ 启动服务失败: %v\n", err)
 	}
