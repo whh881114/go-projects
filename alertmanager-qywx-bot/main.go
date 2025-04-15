@@ -35,7 +35,7 @@ func formatMessage(alert WebhookAlert) []string {
 			buf.WriteString(fmt.Sprintf("<font color=\"warning\">**🔥🔥🔥【监控告警通知】【故障】🔥🔥🔥**</font>\n"))
 		}
 
-		buf.WriteString("----------------------------\n")
+		buf.WriteString("--------------------------------------------------\n")
 		buf.WriteString(fmt.Sprintf("🚨 **状态：** %s\n", a.Status))
 		buf.WriteString(fmt.Sprintf("🔔 **名称：** %s\n", a.Labels["alertname"]))
 		buf.WriteString(fmt.Sprintf("📛 **级别：** %s\n", a.Labels["severity"]))
