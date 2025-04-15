@@ -24,13 +24,21 @@ type WebhookAlert struct {
 }
 
 // formatMessage formats the Alertmanager alert into a Markdown string suitable for WeChat.
-func formatMessage(alert WebhookAlert) string {
-	var buf strings.Builder
-	buf.WriteString(fmt.Sprintf("📣 收到告警（总数：%d）\n", len(alert.Alerts)))
+func formatMessage(alert WebhookAlert) []string {
+	var messages []string
+
 	for _, a := range alert.Alerts {
+		var buf strings.Builder
+
+		if a.Status == "resolved" {
+			buf.WriteString(fmt.Sprintf("✅ 收到恢复信息\n"))
+		} else {
+			buf.WriteString(fmt.Sprintf("📣 收到告警信息\n"))
+		}
+
 		buf.WriteString("----------------------\n")
-		buf.WriteString(fmt.Sprintf("🔔 状态: %s\n", a.Status))
-		buf.WriteString(fmt.Sprintf("🚨 名称: %s\n", a.Labels["alertname"]))
+		buf.WriteString(fmt.Sprintf("🚨 状态: %s\n", a.Status))
+		buf.WriteString(fmt.Sprintf("🔔 名称: %s\n", a.Labels["alertname"]))
 		buf.WriteString(fmt.Sprintf("📛 级别: %s\n", a.Labels["severity"]))
 		buf.WriteString(fmt.Sprintf("🕒 开始: %s\n", a.StartsAt.Format("2006-01-02 15:04:05")))
 		if summary, ok := a.Annotations["summary"]; ok {
@@ -40,8 +48,9 @@ func formatMessage(alert WebhookAlert) string {
 			buf.WriteString(fmt.Sprintf("📄 描述: %s\n", desc))
 		}
 		buf.WriteString(fmt.Sprintf("🔗 链接: %s\n", a.GeneratorURL))
+		messages = append(messages, buf.String())
 	}
-	return buf.String()
+	return messages
 }
 
 func init() {
@@ -77,8 +86,6 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
 		log.Printf("❌ 无法读取请求体: %v\n", err)
 		return
-	} else {
-		log.Printf("✅ 原始请求体: %v\n", string(bodyBytes))
 	}
 
 	var alert WebhookAlert
@@ -90,22 +97,33 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	msg := formatMessage(alert)
+	messages := formatMessage(alert)
+	for _, msg := range messages {
+		payload := map[string]interface{}{
+			"msgtype": "markdown",
+			"markdown": map[string]string{
+				"content": msg,
+			},
+		}
 
-	payload := map[string]interface{}{
-		"msgtype": "markdown",
-		"markdown": map[string]string{
-			"content": msg,
-		},
+		payloadJSON, err := json.Marshal(payload)
+		if err != nil {
+			http.Error(w, "failed to encode payload", http.StatusInternalServerError)
+			log.Printf("❌ 编码Webhook消息失败: %v\n", err)
+			return
+		}
+
+		webhookURL := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=%s", robotID)
+		resp, err := http.Post(webhookURL, "application/json", strings.NewReader(string(payloadJSON)))
+		if err != nil {
+			http.Error(w, "failed to send to WeChat", http.StatusInternalServerError)
+			log.Printf("❌ 发送到企业微信失败: %v\n", err)
+			return
+		}
+		defer resp.Body.Close()
+		respBody, _ := io.ReadAll(resp.Body)
+		log.Printf("✅ 单条告警已发送到机器人 [%s]，状态：%s，响应内容：%s\n", robotID, resp.Status, string(respBody))
 	}
-
-	payloadJSON, err := json.Marshal(payload)
-	if err != nil {
-		http.Error(w, "failed to encode payload", http.StatusInternalServerError)
-		log.Printf("❌ 编码Webhook消息失败: %v\n", err)
-		return
-	}
-
 	webhookURL := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=%s", robotID)
 	resp, err := http.Post(webhookURL, "application/json", strings.NewReader(string(payloadJSON)))
 	if err != nil {
