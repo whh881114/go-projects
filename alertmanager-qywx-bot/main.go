@@ -41,12 +41,12 @@ func formatMessage(alert WebhookAlert) []string {
 		buf.WriteString(fmt.Sprintf("📛 **级别：** %s\n", a.Labels["severity"]))
 		buf.WriteString(fmt.Sprintf("🕒 **开始：** %s\n", a.StartsAt.Format("2006-01-02 15:04:05")))
 		if summary, ok := a.Annotations["summary"]; ok {
-			buf.WriteString(fmt.Sprintf("📋 **概要**：%s\n", summary))
+			buf.WriteString(fmt.Sprintf("📋 **概要：**%s\n", summary))
 		}
 		if desc, ok := a.Annotations["description"]; ok {
-			buf.WriteString(fmt.Sprintf("📄 **描述**：%s\n", desc))
+			buf.WriteString(fmt.Sprintf("📄 **描述：**%s\n", desc))
 		}
-		buf.WriteString(fmt.Sprintf("🔗 **链接**: [点击访问查询结果](%s)\n", a.GeneratorURL))
+		buf.WriteString(fmt.Sprintf("🔗 **链接：**[点击访问查询结果](%s)\n", a.GeneratorURL))
 		messages = append(messages, buf.String())
 	}
 	return messages
