@@ -39,7 +39,8 @@ func formatMessage(alert WebhookAlert) []string {
 		buf.WriteString(fmt.Sprintf("🚨 **状态：** %s\n", a.Status))
 		buf.WriteString(fmt.Sprintf("🔔 **名称：** %s\n", a.Labels["alertname"]))
 		buf.WriteString(fmt.Sprintf("📛 **级别：** %s\n", a.Labels["severity"]))
-		buf.WriteString(fmt.Sprintf("🕒 **开始：** %s\n", a.StartsAt.Format("2006-01-02 15:04:05")))
+		loc, _ := time.LoadLocation("Asia/Shanghai")
+		buf.WriteString(fmt.Sprintf("🕒 **开始：** %s\n", a.StartsAt.In(loc).Format("2006-01-02 15:04:05")))
 		if summary, ok := a.Annotations["summary"]; ok {
 			buf.WriteString(fmt.Sprintf("📋 **概要：**%s\n", summary))
 		}
