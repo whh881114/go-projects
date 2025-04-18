@@ -11,20 +11,22 @@ import (
 	"time"
 )
 
-// WebhookAlert represents the format of a webhook message from AlertManager.
-type WebhookAlert struct {
-	Alerts []struct {
-		Status       string            `json:"status"`
-		Labels       map[string]string `json:"labels"`
-		Annotations  map[string]string `json:"annotations"`
-		StartsAt     time.Time         `json:"startsAt"`
-		EndsAt       time.Time         `json:"endsAt"`
-		GeneratorURL string            `json:"generatorURL"`
-	} `json:"alerts"`
+// AlertmanagerWebhookPayload represents the format of a webhook message from AlertManager.
+type AlertmanagerWebhookPayload struct {
+	Receiver          string                   `json:"receiver"`
+	Status            string                   `json:"status"`
+	Alerts            []map[string]interface{} `json:"alerts"`
+	GroupLabels       map[string]interface{}   `json:"groupLabels"`
+	CommonLabels      map[string]interface{}   `json:"commonLabels"`
+	CommonAnnotations map[string]interface{}   `json:"commonAnnotations"`
+	ExternalURL       string                   `json:"externalURL"`
+	Version           string                   `json:"version"`
+	GroupKey          string                   `json:"groupKey"`
+	TruncatedAlerts   int                      `json:"truncatedAlerts"`
 }
 
-// formatMessage formats the Alertmanager alert into a Markdown string suitable for WeChat.
-func formatMessage(alert WebhookAlert) string {
+// formatMessage formats the AlertmanagerWebhookPayload into a Markdown string suitable for WeChat.
+func formatMessage(alert AlertmanagerWebhookPayload) string {
 	var buf strings.Builder
 
 	if alert.Status == "resolved" {
@@ -35,14 +37,15 @@ func formatMessage(alert WebhookAlert) string {
 
 	buf.WriteString("--------------------------------------------------\n")
 	buf.WriteString(fmt.Sprintf("🚨 **状态：** %s\n", alert.Status))
-	buf.WriteString(fmt.Sprintf("🔔 **名称：** %s\n", alert.commonLabels["alertname"]))
-	buf.WriteString(fmt.Sprintf("📛 **级别：** %s\n", alert.commonLabels["severity"]))
-	if summary, ok := alert.commonAnnotations["summary"]; ok {
+	buf.WriteString(fmt.Sprintf("🔔 **名称：** %s\n", alert.CommonLabels["alertname"]))
+	buf.WriteString(fmt.Sprintf("📛 **级别：** %s\n", alert.CommonLabels["severity"]))
+	if summary, ok := alert.CommonAnnotations["summary"]; ok {
 		buf.WriteString(fmt.Sprintf("📋 **概要：**%s\n", summary))
 	}
-	if desc, ok := alert.commonAnnotations["description"]; ok {
+	if desc, ok := alert.CommonAnnotations["description"]; ok {
 		buf.WriteString(fmt.Sprintf("📄 **描述：**%s\n", desc))
 	}
+	buf.WriteString(fmt.Sprintf("🤖 **接收者：** %s\n", alert.Receiver))
 
 	return buf.String()
 }
@@ -82,7 +85,7 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	var alert WebhookAlert
+	var alert AlertmanagerWebhookPayload
 	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
 		log.Printf("📬 请求头: %+v\n", r.Header)
 		log.Printf("📦 原始请求体: %s\n", string(bodyBytes))
@@ -117,7 +120,12 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("❌ 发送到企业微信失败: %v\n", err)
 		return
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if err := resp.Body.Close(); err != nil {
+			log.Printf("❌ 关闭响应体失败: %v", err)
+		}
+	}()
+
 	respBody, _ := io.ReadAll(resp.Body)
 	log.Printf("✅ 单条告警已发送到机器人 [%s]，状态：%s，响应内容：%s\n", robotID, resp.Status, string(respBody))
 }
