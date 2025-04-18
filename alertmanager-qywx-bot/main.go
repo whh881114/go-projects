@@ -90,11 +90,14 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 
 	var alert WebhookAlert
 	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
-		log.Printf("📦 原始请求体: %s\n", string(bodyBytes))
 		log.Printf("📬 请求头: %+v\n", r.Header)
+		log.Printf("📦 原始请求体: %s\n", string(bodyBytes))
 		http.Error(w, "invalid alert data", http.StatusBadRequest)
 		log.Printf("❌ 解码告警数据失败: %v\n", err)
 		return
+	} else {
+		log.Printf("📬 请求头: %+v\n", r.Header)
+		log.Printf("📦 原始请求体: %s\n", string(bodyBytes))
 	}
 
 	messages := formatMessage(alert)
