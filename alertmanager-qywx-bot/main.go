@@ -46,7 +46,7 @@ func formatMessage(alert AlertmanagerWebhookPayload) string {
 	if desc, ok := alert.CommonAnnotations["description"]; ok {
 		buf.WriteString(fmt.Sprintf("📄 **描述：**%s\n", desc))
 	}
-	buf.WriteString(fmt.Sprintf("🧑‍💻 **故障处理负责人：** %s\n", path.Base(alert.Receiver)))
+	buf.WriteString(fmt.Sprintf("🛠 **故障处理负责人：** %s\n", path.Base(alert.Receiver)))
 
 	return buf.String()
 }
