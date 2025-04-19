@@ -43,8 +43,8 @@ type jsonLogWriter struct {
 func (w *jsonLogWriter) Write(p []byte) (n int, err error) {
 	// original log message
 	msg := strings.TrimSuffix(string(p), "\n")
-	// split into phase and status by first ": "
-	parts := strings.SplitN(msg, ": ", 2)
+	// split into phase and status by first "/"
+	parts := strings.SplitN(msg, "/", 2)
 
 	phase := parts[0]
 	status := ""
@@ -112,28 +112,28 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	// 在这里，若需记录自定义 phase 和 status，可用格式 "phase: status"
 	robotID := strings.TrimPrefix(r.URL.Path, "/")
 	if robotID == "" {
-		http.Error(w, "robot id missing", http.StatusBadRequest)
-		log.Println("错误: 缺少机器人ID")
+		http.Error(w, "Missing robot ID.", http.StatusBadRequest)
+		log.Println("检查阶段/缺少机器人ID。")
 		return
 	}
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
-		http.Error(w, "failed to read body", http.StatusBadRequest)
-		log.Printf("阶段: 读取请求体 错误: %v", err)
+		http.Error(w, "Failed to read body.", http.StatusBadRequest)
+		log.Printf("读取Prometheus请求体失败/%v", err)
 		return
 	}
 
 	var alert AlertmanagerWebhookPayload
 	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
-		log.Printf("阶段: 解析请求头 结果: %v", r.Header)
-		log.Printf("阶段: 打印原始请求体 结果: %s", string(bodyBytes))
-		http.Error(w, "invalid alert data", http.StatusBadRequest)
-		log.Printf("阶段: 解码告警数据失败 错误: %v", err)
+		log.Printf("打印Prometheus请求头内容/%v", r.Header)
+		log.Printf("打印Prometheus请求体内容/%s", string(bodyBytes))
+		http.Error(w, "Invalid alert data.", http.StatusBadRequest)
+		log.Printf("解析Prometheus请求体为json格式数据失败/%v", err)
 		return
 	} else {
-		log.Printf("阶段: 解析请求头 结果: %v", r.Header)
-		log.Printf("阶段: 打印原始请求体 结果: %s", string(bodyBytes))
+		log.Printf("打印Prometheus请求头内容：%v", r.Header)
+		log.Printf("打印Prometheus请求体内容: %s", string(bodyBytes))
 	}
 
 	messages := formatMessage(alert)
@@ -145,27 +145,27 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
-		http.Error(w, "failed to encode payload", http.StatusInternalServerError)
-		log.Printf("阶段: 编码Webhook消息失败 错误: %v", err)
+		http.Error(w, "Failed to encode payload.", http.StatusInternalServerError)
+		log.Printf("封装Webhook消息失败/%v", err)
 		return
 	}
 
 	webhookURL := fmt.Sprintf("https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=%s", robotID)
 	resp, err := http.Post(webhookURL, "application/json", strings.NewReader(string(payloadJSON)))
 	if err != nil {
-		http.Error(w, "failed to send to WeChat", http.StatusInternalServerError)
-		log.Printf("阶段: 发送到企业微信失败 错误: %v", err)
+		http.Error(w, "Failed to send to WeChat", http.StatusInternalServerError)
+		log.Printf("发送到企业微信失败/%v", err)
 		return
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("阶段: 关闭响应体失败 错误: %v", err)
+			log.Printf("关闭响应体失败/%v", err)
 		}
 	}()
 
 	respBody, _ := io.ReadAll(resp.Body)
 	// use respBody in log to avoid unused variable error
-	log.Printf("服务状态: 启动成功，监控端口为%s，响应内容: %s", resp.Status, string(respBody))
+	log.Printf("发送消息成功/%s", string(respBody))
 }
 
 func main() {
@@ -175,8 +175,8 @@ func main() {
 	}
 	http.HandleFunc("/", alertHandler)
 	// 使用自定义 phase:status 格式
-	log.Printf("服务状态: 🚀 启动成功，监控端口为%s。", port)
+	log.Printf("服务状态/启动成功，监听端口为%s。", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatalf("阶段: 启动HTTP服务失败 错误: %v", err)
+		log.Fatalf("服务状态/启动失败，错误信息：%v。", err)
 	}
 }
