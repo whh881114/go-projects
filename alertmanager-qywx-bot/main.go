@@ -27,12 +27,12 @@ type AlertmanagerWebhookPayload struct {
 }
 
 // logEntry defines the structured JSON log format
-// action: describes the step or operation
-// result: the outcome or data associated with that step
+// phase: describes the step or operation
+// status: the outcome or data associated with that step
 type logEntry struct {
 	Timestamp string `json:"timestamp"`
-	Action    string `json:"action"`
-	Result    string `json:"result"`
+	Phase     string `json:"phase"`
+	Status    string `json:"status"`
 }
 
 // jsonLogWriter formats each log entry into structured JSON and writes to stdout
@@ -43,20 +43,21 @@ type jsonLogWriter struct {
 func (w *jsonLogWriter) Write(p []byte) (n int, err error) {
 	// original log message
 	msg := strings.TrimSuffix(string(p), "\n")
-	// split into action and result
+	// split into phase and status by first ": "
 	parts := strings.SplitN(msg, ": ", 2)
-	action := parts[0]
-	result := ""
+
+	phase := parts[0]
+	status := ""
 	if len(parts) > 1 {
-		result = parts[1]
+		status = parts[1]
 	}
 
 	// construct structured entry
 	timestamp := time.Now().In(w.loc).Format(time.RFC3339)
 	entry := logEntry{
 		Timestamp: timestamp,
-		Action:    action,
-		Result:    result,
+		Phase:     phase,
+		Status:    status,
 	}
 	// serialize to JSON
 	b, err := json.Marshal(entry)
@@ -108,30 +109,31 @@ func formatMessage(alert AlertmanagerWebhookPayload) string {
 
 // alertHandler handles incoming webhook alerts and forwards them to a WeChat robot webhook URL.
 func alertHandler(w http.ResponseWriter, r *http.Request) {
+	// 在这里，若需记录自定义 phase 和 status，可用格式 "phase: status"
 	robotID := strings.TrimPrefix(r.URL.Path, "/")
 	if robotID == "" {
 		http.Error(w, "robot id missing", http.StatusBadRequest)
-		log.Println("❌ 缺少机器人ID")
+		log.Println("错误: 缺少机器人ID")
 		return
 	}
 
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
-		log.Printf("❌ 无法读取请求体: %v", err)
+		log.Printf("阶段: 读取请求体 错误: %v", err)
 		return
 	}
 
 	var alert AlertmanagerWebhookPayload
 	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
-		log.Printf("📬 请求头: %+v", r.Header)
-		log.Printf("📦 原始请求体: %s", string(bodyBytes))
+		log.Printf("阶段: 解析请求头 结果: %v", r.Header)
+		log.Printf("阶段: 打印原始请求体 结果: %s", string(bodyBytes))
 		http.Error(w, "invalid alert data", http.StatusBadRequest)
-		log.Printf("❌ 解码告警数据失败: %v", err)
+		log.Printf("阶段: 解码告警数据失败 错误: %v", err)
 		return
 	} else {
-		log.Printf("📬 请求头: %+v", r.Header)
-		log.Printf("📦 原始请求体: %s", string(bodyBytes))
+		log.Printf("阶段: 解析请求头 结果: %v", r.Header)
+		log.Printf("阶段: 打印原始请求体 结果: %s", string(bodyBytes))
 	}
 
 	messages := formatMessage(alert)
@@ -144,7 +146,7 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		http.Error(w, "failed to encode payload", http.StatusInternalServerError)
-		log.Printf("❌ 编码Webhook消息失败: %v", err)
+		log.Printf("阶段: 编码Webhook消息失败 错误: %v", err)
 		return
 	}
 
@@ -152,17 +154,18 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	resp, err := http.Post(webhookURL, "application/json", strings.NewReader(string(payloadJSON)))
 	if err != nil {
 		http.Error(w, "failed to send to WeChat", http.StatusInternalServerError)
-		log.Printf("❌ 发送到企业微信失败: %v", err)
+		log.Printf("阶段: 发送到企业微信失败 错误: %v", err)
 		return
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("❌ 关闭响应体失败: %v", err)
+			log.Printf("阶段: 关闭响应体失败 错误: %v", err)
 		}
 	}()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	log.Printf("✅ 单条告警已发送到机器人 [%s]，状态：%s，响应内容：%s", robotID, resp.Status, string(respBody))
+	// use respBody in log to avoid unused variable error
+	log.Printf("服务状态: 启动成功，监控端口为%s，响应内容: %s", resp.Status, string(respBody))
 }
 
 func main() {
@@ -171,8 +174,9 @@ func main() {
 		port = p
 	}
 	http.HandleFunc("/", alertHandler)
-	log.Printf("🚀 服务已启动，监听端口：%s", port)
+	// 使用自定义 phase:status 格式
+	log.Printf("服务状态: 🚀 启动成功，监控端口为%s。", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatalf("❌ 启动服务失败: %v", err)
+		log.Fatalf("阶段: 启动HTTP服务失败 错误: %v", err)
 	}
 }
