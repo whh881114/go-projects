@@ -132,8 +132,8 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 		log.Printf("解析Prometheus请求体为json格式数据失败/%v", err)
 		return
 	} else {
-		log.Printf("打印Prometheus请求头内容：%v", r.Header)
-		log.Printf("打印Prometheus请求体内容: %s", string(bodyBytes))
+		log.Printf("打印Prometheus请求头内容/%v", r.Header)
+		log.Printf("打印Prometheus请求体内容/%s", string(bodyBytes))
 	}
 
 	messages := formatMessage(alert)
