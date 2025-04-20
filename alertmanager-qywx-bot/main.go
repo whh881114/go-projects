@@ -89,13 +89,14 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	var alert AlertmanagerWebhookPayload
 
 	// Log request headers
-	headerJson, _ := json.MarshalIndent(r.Header, "", "  ")
+	plainLogger := log.New(os.Stdout, "", 0)
+	headerJson, _ := json.Marshal(r.Header)
 	log.Printf("📬 请求头\n")
-	log.Printf("%s\n", headerJson)
+	plainLogger.Printf("%s\n", headerJson)
 
 	// Log raw request body
 	log.Printf("📦 请求体：\n")
-	log.Printf("%s\n", string(bodyBytes))
+	plainLogger.Printf("%s\n", string(bodyBytes))
 
 	// Attempt to decode JSON body into AlertmanagerWebhookPayload
 	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
