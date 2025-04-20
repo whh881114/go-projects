@@ -96,7 +96,7 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 
 	// Log raw request body
 	log.Printf("📦 请求体：\n")
-	plainLogger.Printf("%s\n", string(bodyBytes))
+	plainLogger.Printf("%s", string(bodyBytes))
 
 	// Attempt to decode JSON body into AlertmanagerWebhookPayload
 	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
