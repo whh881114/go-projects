@@ -88,19 +88,13 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 
 	var alert AlertmanagerWebhookPayload
 
-	// Log request headers
-	plainLogger := log.New(os.Stdout, "", 0)
-	headerJson, _ := json.Marshal(r.Header)
-	log.Printf("📬 请求头：\n")
-	plainLogger.Printf("%s\n", headerJson)
-
 	// Log raw request body
-	log.Printf("📦 请求体：\n")
+	log.Printf("📦 告警信息请求体：\n")
 	plainLogger.Printf("%s", string(bodyBytes))
 
 	// Attempt to decode JSON body into AlertmanagerWebhookPayload
 	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
-		log.Printf("❌ 解码告警数据失败：%v\n", err)
+		log.Printf("❌ 解码告警信息失败：%v\n", err)
 		http.Error(w, "invalid alert data", http.StatusBadRequest)
 		return
 	}
