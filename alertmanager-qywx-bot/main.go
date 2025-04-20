@@ -91,7 +91,7 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	// Log request headers
 	plainLogger := log.New(os.Stdout, "", 0)
 	headerJson, _ := json.Marshal(r.Header)
-	log.Printf("📬 请求头\n")
+	log.Printf("📬 请求头：\n")
 	plainLogger.Printf("%s\n", headerJson)
 
 	// Log raw request body
@@ -132,12 +132,12 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("❌ 关闭响应体失败：%v", err)
+			log.Printf("❌ 关闭响应体失败：%v\n", err)
 		}
 	}()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	log.Printf("✅ 单条告警已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
+	log.Printf("✅ 告警信息已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
 }
 
 // main starts the HTTP server.
