@@ -82,21 +82,29 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	bodyBytes, err := io.ReadAll(r.Body)
 	if err != nil {
 		http.Error(w, "failed to read body", http.StatusBadRequest)
-		log.Printf("❌ 无法读取请求体: %v\n", err)
+		log.Printf("❌ 无法读取请求体：%v\n", err)
 		return
 	}
 
 	var alert AlertmanagerWebhookPayload
+
+	// Log request headers
+	headerJson, _ := json.MarshalIndent(r.Header, "", "  ")
+	log.Printf("📬 请求头\n")
+	log.Printf("%s\n", headerJson)
+
+	// Log raw request body
+	log.Printf("📦 请求体：\n")
+	log.Printf("%s\n", string(bodyBytes))
+
+	// Attempt to decode JSON body into AlertmanagerWebhookPayload
 	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
-		log.Printf("📬 请求头: %+v\n", r.Header)
-		log.Printf("📦 原始请求体: %s\n", string(bodyBytes))
+		log.Printf("❌ 解码告警数据失败：%v\n", err)
 		http.Error(w, "invalid alert data", http.StatusBadRequest)
-		log.Printf("❌ 解码告警数据失败: %v\n", err)
 		return
-	} else {
-		log.Printf("📬 请求头: %+v\n", r.Header)
-		log.Printf("📦 原始请求体: %s\n", string(bodyBytes))
 	}
+
+	robotName := path.Base(alert.Receiver)
 
 	messages := formatMessage(alert)
 
@@ -110,7 +118,7 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	payloadJSON, err := json.Marshal(payload)
 	if err != nil {
 		http.Error(w, "failed to encode payload", http.StatusInternalServerError)
-		log.Printf("❌ 编码Webhook消息失败: %v\n", err)
+		log.Printf("❌ 编码Webhook消息失败：%v\n", err)
 		return
 	}
 
@@ -118,17 +126,17 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	resp, err := http.Post(webhookURL, "application/json", strings.NewReader(string(payloadJSON)))
 	if err != nil {
 		http.Error(w, "failed to send to WeChat", http.StatusInternalServerError)
-		log.Printf("❌ 发送到企业微信失败: %v\n", err)
+		log.Printf("❌ 发送到企业微信失败：%v\n", err)
 		return
 	}
 	defer func() {
 		if err := resp.Body.Close(); err != nil {
-			log.Printf("❌ 关闭响应体失败: %v", err)
+			log.Printf("❌ 关闭响应体失败：%v", err)
 		}
 	}()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	log.Printf("✅ 单条告警已发送到机器人 [%s]，状态：%s，响应内容：%s\n", robotID, resp.Status, string(respBody))
+	log.Printf("✅ 单条告警已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
 }
 
 // main starts the HTTP server.
@@ -140,6 +148,6 @@ func main() {
 	http.HandleFunc("/", alertHandler)
 	log.Printf("🚀 服务已启动，监听端口：%s\n", port)
 	if err := http.ListenAndServe(":"+port, nil); err != nil {
-		log.Fatalf("❌ 启动服务失败: %v\n", err)
+		log.Fatalf("❌ 启动服务失败：%v\n", err)
 	}
 }
