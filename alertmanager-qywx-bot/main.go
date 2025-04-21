@@ -100,7 +100,7 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	if alert.Status == "firing" {
 		log.Printf("📦 告警信息请求体：\n")
 	} else {
-		log.Printf("📦 恢复信息请求体：\n")
+		log.Printf("🔧 恢复信息请求体：\n")
 	}
 	plainLogger.Printf("%s", string(bodyBytes))
 
@@ -136,9 +136,9 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	respBody, _ := io.ReadAll(resp.Body)
 
 	if alert.Status == "firing" {
-		log.Printf("✅ 告警信息已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
+		log.Printf("📦 告警信息已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
 	} else {
-		log.Printf("✅ 恢复信息已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
+		log.Printf("🔧 恢复信息已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
 	}
 }
 
