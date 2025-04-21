@@ -88,22 +88,24 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 
 	var alert AlertmanagerWebhookPayload
 
-	// Log raw request body
-	plainLogger := log.New(os.Stdout, "", 0)
-	log.Printf("📦 告警信息请求体：\n")
-	plainLogger.Printf("%s", string(bodyBytes))
-
 	// Attempt to decode JSON body into AlertmanagerWebhookPayload
 	if err := json.Unmarshal(bodyBytes, &alert); err != nil {
-		log.Printf("❌ 解码告警信息请求体失败：%v\n", err)
+		log.Printf("❌ 解码请求体失败：%v\n", err)
 		http.Error(w, "invalid alert data", http.StatusBadRequest)
 		return
 	}
 
+	// Log raw request body
+	plainLogger := log.New(os.Stdout, "", 0)
+	if alert.Status == "firing" {
+		log.Printf("📦 告警信息请求体：\n")
+	} else {
+		log.Printf("📦 恢复信息请求体：\n")
+	}
+	plainLogger.Printf("%s", string(bodyBytes))
+
 	robotName := path.Base(alert.Receiver)
-
 	messages := formatMessage(alert)
-
 	payload := map[string]interface{}{
 		"msgtype": "markdown",
 		"markdown": map[string]string{
@@ -132,7 +134,12 @@ func alertHandler(w http.ResponseWriter, r *http.Request) {
 	}()
 
 	respBody, _ := io.ReadAll(resp.Body)
-	log.Printf("✅ 告警信息已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
+
+	if alert.Status == "firing" {
+		log.Printf("✅ 告警信息已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
+	} else {
+		log.Printf("✅ 恢复信息已发送到机器人：[%s]，状态：%s，响应内容：%s\n", robotName, resp.Status, string(respBody))
+	}
 }
 
 // main starts the HTTP server.
