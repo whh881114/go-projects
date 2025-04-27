@@ -5,28 +5,28 @@ import (
 	"encoding/base64"
 	"encoding/json"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
 	"time"
 
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
-	"k8s.io/apimachinery/pkg/util/wait"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+
+	yaml "gopkg.in/yaml.v2"
 )
 
-// 配置文件结构
+// RegistryConfig 配置文件结构
 type RegistryConfig struct {
 	Registries []RegistryEntry `yaml:"registries"`
 }
 
 type RegistryEntry struct {
 	Name       string   `yaml:"name"`
-	Server     string   `yaml:"server"`
+	Registry   string   `yaml:"registry"`
 	Username   string   `yaml:"username"`
 	Password   string   `yaml:"password"`
 	Namespaces []string `yaml:"namespaces"`
@@ -36,7 +36,7 @@ func main() {
 	// 加载配置
 	configPath := os.Getenv("CONFIG_PATH")
 	if configPath == "" {
-		configPath = "/etc/registry-config/config.yaml"
+		configPath = "/etc/docker-credentials.yaml"
 	}
 	cfg, err := loadConfig(configPath)
 	if err != nil {
@@ -60,7 +60,7 @@ func main() {
 		log.Fatalf("初始化同步失败: %v", err)
 	}
 
-	// 监听 namespace 变化
+	// 监听 namespace 变化，有更新时就会响应，如果每隔10分钟把全量列表同步一遍。
 	factory := informers.NewSharedInformerFactory(clientset, time.Minute*10)
 	nsInformer := factory.Core().V1().Namespaces().Informer()
 
@@ -81,60 +81,55 @@ func main() {
 	factory.Start(stopCh)
 	factory.WaitForCacheSync(stopCh)
 
-	// 保持运行
-	wait.NeverStop
+	// 阻塞主线程，保持程序常驻
 	select {}
 
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
-	factory.Start(stopCh)
-	factory.WaitForCacheSync(stopCh)
-
-	// 保持 pod 存活
-	select {}
 }
 
 func loadConfig(path string) (*RegistryConfig, error) {
-	data, err := ioutil.ReadFile(path)
+	data, err := os.ReadFile(path)
 	if err != nil {
 		return nil, err
 	}
-	var config RegistryConfig
-	err = yaml.Unmarshal(data, &config)
-	return &config, err
+	var cfg RegistryConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
 }
 
-func distributeSecrets(ctx context.Context, clientset *kubernetes.Clientset, config *RegistryConfig) error {
+func distributeSecrets(ctx context.Context, clientset *kubernetes.Clientset, cfg *RegistryConfig) error {
+	// 列出所有 namespace
 	nsList, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
 	if err != nil {
-		return fmt.Errorf("列出namespaces失败: %v", err)
+		return fmt.Errorf("列出 namespaces 失败: %w", err)
 	}
-
-	nsMap := make(map[string]bool)
+	// 快速查表
+	existNS := map[string]bool{}
 	for _, ns := range nsList.Items {
-		nsMap[ns.Name] = true
+		existNS[ns.Name] = true
 	}
 
-	for _, reg := range config.Registries {
+	// 遍历每条 RegistryEntry
+	for _, reg := range cfg.Registries {
+		// 构造 .dockerconfigjson
 		auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", reg.Username, reg.Password)))
-		dockerCfg := map[string]interface{}{
+		dockCfg := map[string]interface{}{
 			"auths": map[string]interface{}{
-				reg.Server: map[string]string{
+				reg.Registry: map[string]string{
 					"username": reg.Username,
 					"password": reg.Password,
 					"auth":     auth,
 				},
 			},
 		}
-		dockerCfgJson, _ := json.Marshal(dockerCfg)
+		raw, _ := json.Marshal(dockCfg)
 
 		for _, ns := range reg.Namespaces {
-			if !nsMap[ns] {
+			if ns != "*" && !existNS[ns] {
 				log.Printf("namespace %s 不存在，跳过", ns)
 				continue
 			}
-
 			secret := &corev1.Secret{
 				ObjectMeta: metav1.ObjectMeta{
 					Name:      reg.Name,
@@ -142,30 +137,25 @@ func distributeSecrets(ctx context.Context, clientset *kubernetes.Clientset, con
 				},
 				Type: corev1.SecretTypeDockerConfigJson,
 				Data: map[string][]byte{
-					corev1.DockerConfigJsonKey: dockerCfgJson,
+					corev1.DockerConfigJsonKey: raw,
 				},
 			}
 
-			_, err := clientset.CoreV1().Secrets(ns).Get(ctx, reg.Name, metav1.GetOptions{})
-			if err != nil {
-				// 如果不存在就创建
-				_, err = clientset.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{})
-				if err != nil {
-					log.Printf("在namespace %s 创建secret %s 失败: %v", ns, reg.Name, err)
+			// Create or Update
+			if _, err := clientset.CoreV1().Secrets(ns).Get(ctx, reg.Name, metav1.GetOptions{}); err != nil {
+				if _, err := clientset.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+					log.Printf("在 %s 创建 secret %s 失败: %v", ns, reg.Name, err)
 				} else {
-					log.Printf("在namespace %s 创建secret %s 成功", ns, reg.Name)
+					log.Printf("在 %s 创建 secret %s 成功", ns, reg.Name)
 				}
 			} else {
-				// 存在就更新
-				_, err = clientset.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{})
-				if err != nil {
-					log.Printf("在namespace %s 更新secret %s 失败: %v", ns, reg.Name, err)
+				if _, err := clientset.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+					log.Printf("在 %s 更新 secret %s 失败: %v", ns, reg.Name, err)
 				} else {
-					log.Printf("在namespace %s 更新secret %s 成功", ns, reg.Name)
+					log.Printf("在 %s 更新 secret %s 成功", ns, reg.Name)
 				}
 			}
 		}
 	}
-
 	return nil
 }
