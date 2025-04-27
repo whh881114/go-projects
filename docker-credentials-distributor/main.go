@@ -62,10 +62,21 @@ func main() {
 	if id == "" {
 		id, _ = os.Hostname()
 	}
+
+	namespace := os.Getenv("POD_NAMESPACE")
+	if namespace == "" {
+		namespace = "kube-system"
+	}
+
+	lockName := os.Getenv("POD_LOCK_NAME")
+	if lockName == "" {
+		lockName = id
+	}
+
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      "secret-distributor-lock",
-			Namespace: "kube-system",
+			Name:      lockName,
+			Namespace: namespace,
 		},
 		Client: clientset.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
