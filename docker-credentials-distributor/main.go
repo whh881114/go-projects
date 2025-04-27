@@ -58,7 +58,7 @@ func main() {
 	}
 
 	// LeaseLock 用来做 leader election
-	id := os.Getenv("POD_NAME")
+	id := os.Getenv("NAME")
 	if id == "" {
 		id, _ = os.Hostname()
 	}
