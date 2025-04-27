@@ -58,9 +58,14 @@ func main() {
 	}
 
 	// LeaseLock 用来做 leader election
-	id := os.Getenv("NAME")
+	id := os.Getenv("POD_NAME")
 	if id == "" {
 		id, _ = os.Hostname()
+	}
+
+	lockName := os.Getenv("LOCK_NAME")
+	if lockName == "" {
+		lockName = "secret-distributor-lock"
 	}
 
 	namespace := os.Getenv("NAMESPACE")
@@ -70,7 +75,7 @@ func main() {
 
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      id,
+			Name:      lockName,
 			Namespace: namespace,
 		},
 		Client: clientset.CoordinationV1(),
