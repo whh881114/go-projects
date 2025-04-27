@@ -1,4 +1,4 @@
-module github.com/whh881114/go-projects/registry-secret-distributor
+module github.com/whh881114/go-projects/docker-credentials-distributor
 
 go 1.24.0
 
