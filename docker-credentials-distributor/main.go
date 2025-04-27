@@ -12,14 +12,13 @@ import (
 	"os"
 	"time"
 
+	"gopkg.in/yaml.v2"
 	corev1 "k8s.io/api/core/v1"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/client-go/informers"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
-
-	"gopkg.in/yaml.v2"
 )
 
 // RegistryConfig 配置文件结构
@@ -46,6 +45,8 @@ func main() {
 		log.Fatalf("加载配置失败: %v", err)
 	}
 
+	ctx := context.Background()
+
 	// 创建 k8s client
 	k8sConfig, err := rest.InClusterConfig()
 	if err != nil {
@@ -56,36 +57,40 @@ func main() {
 		log.Fatalf("创建kubernetes client失败: %v", err)
 	}
 
-	// 构造一个 LeaseLock
+	// LeaseLock 用来做 leader election
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
 			Name:      "secret-distributor-lock",
-			Namespace: "your-namespace",
+			Namespace: "default", // 放你部署的 namespace
 		},
 		Client: clientset.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: os.Getenv("POD_NAME"), // 唯一标识
+			Identity: os.Getenv("POD_NAME"), // 在 Pod Spec 里以 env 注入
 		},
 	}
 
-	// 启动选举，避免单点故障
-	leaderelection.RunOrDie(context.TODO(), leaderelection.LeaderElectionConfig{
+	// 选举配置
+	lec := leaderelection.LeaderElectionConfig{
 		Lock:          lock,
 		LeaseDuration: 15 * time.Second,
 		RenewDeadline: 10 * time.Second,
 		RetryPeriod:   2 * time.Second,
 
-		OnStartedLeading: func(ctx context.Context) {
-			// 只有 Leader 会执行真正的分发逻辑
-			runDistributor(ctx, clientset)
+		// 注意：是放在 Callbacks 里
+		Callbacks: leaderelection.LeaderCallbacks{
+			OnStartedLeading: func(ctx context.Context) {
+				log.Println("我当上 Leader 了，开始分发逻辑")
+				runDistributor(ctx, clientset, cfg)
+			},
+			OnStoppedLeading: func() {
+				log.Println("我不再是 Leader 了，进程退出")
+				os.Exit(0)
+			},
 		},
-		OnStoppedLeading: func() {
-			log.Println("失去 Leader，进程退出或转为 Standby")
-			os.Exit(0)
-		},
-	})
+	}
 
-	ctx := context.Background()
+	// 启动选举（会阻塞，直到进程退出）
+	leaderelection.RunOrDie(ctx, lec)
 
 	// 初始化时，把配置同步一遍
 	if err := distributeSecrets(ctx, clientset, cfg); err != nil {
@@ -190,4 +195,33 @@ func distributeSecrets(ctx context.Context, clientset *kubernetes.Clientset, cfg
 		}
 	}
 	return nil
+}
+
+// runDistributor 负责“leader”真正干的活：一次全量 + informer 持续监听
+func runDistributor(ctx context.Context, clientset *kubernetes.Clientset, cfg *RegistryConfig) {
+	// 1) 初始化全量分发
+	if err := distributeSecrets(ctx, clientset, cfg); err != nil {
+		log.Fatalf("初始化分发失败: %v", err)
+	}
+
+	// 2) 启 informer 继续监听新 namespace
+	factory := informers.NewSharedInformerFactory(clientset, 0)
+	nsInf := factory.Core().V1().Namespaces().Informer()
+	nsInf.AddEventHandler(cache.ResourceEventHandlerFuncs{
+		AddFunc: func(obj interface{}) {
+			ns := obj.(*corev1.Namespace)
+			log.Printf("Leader 分发模式：检测新 namespace %s", ns.Name)
+			if err := distributeSecrets(ctx, clientset, cfg); err != nil {
+				log.Printf("分发失败: %v", err)
+			}
+		},
+	})
+
+	stopCh := make(chan struct{})
+	defer close(stopCh)
+	factory.Start(stopCh)
+	factory.WaitForCacheSync(stopCh)
+
+	// 阻塞直到 Context 被取消（比如 OnStoppedLeading 调用 os.Exit）
+	<-ctx.Done()
 }
