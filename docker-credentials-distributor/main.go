@@ -61,7 +61,7 @@ func main() {
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
 			Name:      "secret-distributor-lock",
-			Namespace: "default", // 放你部署的 namespace
+			Namespace: "kube-system", // 放你部署的 namespace
 		},
 		Client: clientset.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
