@@ -68,7 +68,7 @@ func main() {
 		namespace = "kube-system"
 	}
 
-	lockName := os.Getenv("POD_LOCK_NAME")
+	lockName := os.Getenv("LOCK_NAME")
 	if lockName == "" {
 		lockName = id
 	}
