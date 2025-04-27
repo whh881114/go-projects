@@ -6,6 +6,8 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"log"
 	"os"
 	"time"
@@ -53,6 +55,35 @@ func main() {
 	if err != nil {
 		log.Fatalf("创建kubernetes client失败: %v", err)
 	}
+
+	// 构造一个 LeaseLock
+	lock := &resourcelock.LeaseLock{
+		LeaseMeta: metav1.ObjectMeta{
+			Name:      "secret-distributor-lock",
+			Namespace: "your-namespace",
+		},
+		Client: clientset.CoordinationV1(),
+		LockConfig: resourcelock.ResourceLockConfig{
+			Identity: os.Getenv("POD_NAME"), // 唯一标识
+		},
+	}
+
+	// 启动选举，避免单点故障
+	leaderelection.RunOrDie(context.TODO(), leaderelection.LeaderElectionConfig{
+		Lock:          lock,
+		LeaseDuration: 15 * time.Second,
+		RenewDeadline: 10 * time.Second,
+		RetryPeriod:   2 * time.Second,
+
+		OnStartedLeading: func(ctx context.Context) {
+			// 只有 Leader 会执行真正的分发逻辑
+			runDistributor(ctx, clientset)
+		},
+		OnStoppedLeading: func() {
+			log.Println("失去 Leader，进程退出或转为 Standby")
+			os.Exit(0)
+		},
+	})
 
 	ctx := context.Background()
 
