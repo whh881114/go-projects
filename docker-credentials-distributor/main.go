@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/json"
+	"flag"
 	"fmt"
 	"log"
 	"os"
@@ -33,12 +34,12 @@ type RegistryEntry struct {
 }
 
 func main() {
+	// 使用 flag 解析命令行参数
+	configFile := flag.String("config", "/etc/docker-credentials.yaml", "配置文件路径")
+	flag.Parse()
+
 	// 加载配置
-	configPath := os.Getenv("CONFIG_PATH")
-	if configPath == "" {
-		configPath = "/etc/docker-credentials.yaml"
-	}
-	cfg, err := loadConfig(configPath)
+	cfg, err := loadConfig(*configFile)
 	if err != nil {
 		log.Fatalf("加载配置失败: %v", err)
 	}
