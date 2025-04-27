@@ -63,7 +63,7 @@ func main() {
 		id, _ = os.Hostname()
 	}
 
-	namespace := os.Getenv("POD_NAMESPACE")
+	namespace := os.Getenv("NAMESPACE")
 	if namespace == "" {
 		namespace = "kube-system"
 	}
