@@ -68,14 +68,9 @@ func main() {
 		namespace = "kube-system"
 	}
 
-	lockName := os.Getenv("LOCK_NAME")
-	if lockName == "" {
-		lockName = id
-	}
-
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
-			Name:      lockName,
+			Name:      id,
 			Namespace: namespace,
 		},
 		Client: clientset.CoordinationV1(),
