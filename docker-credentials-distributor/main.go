@@ -6,8 +6,6 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
-	"k8s.io/client-go/tools/leaderelection"
-	"k8s.io/client-go/tools/leaderelection/resourcelock"
 	"log"
 	"os"
 	"time"
@@ -19,6 +17,8 @@ import (
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
 	"k8s.io/client-go/tools/cache"
+	"k8s.io/client-go/tools/leaderelection"
+	"k8s.io/client-go/tools/leaderelection/resourcelock"
 )
 
 // RegistryConfig 配置文件结构
@@ -54,18 +54,22 @@ func main() {
 	}
 	clientset, err := kubernetes.NewForConfig(k8sConfig)
 	if err != nil {
-		log.Fatalf("创建kubernetes client失败: %v", err)
+		log.Fatalf("创建 kubernetes client 失败: %v", err)
 	}
 
 	// LeaseLock 用来做 leader election
+	id := os.Getenv("POD_NAME")
+	if id == "" {
+		id, _ = os.Hostname()
+	}
 	lock := &resourcelock.LeaseLock{
 		LeaseMeta: metav1.ObjectMeta{
 			Name:      "secret-distributor-lock",
-			Namespace: "kube-system", // 放你部署的 namespace
+			Namespace: "kube-system",
 		},
 		Client: clientset.CoordinationV1(),
 		LockConfig: resourcelock.ResourceLockConfig{
-			Identity: os.Getenv("POD_NAME"), // 在 Pod Spec 里以 env 注入
+			Identity: id,
 		},
 	}
 
@@ -75,8 +79,6 @@ func main() {
 		LeaseDuration: 15 * time.Second,
 		RenewDeadline: 10 * time.Second,
 		RetryPeriod:   2 * time.Second,
-
-		// 注意：是放在 Callbacks 里
 		Callbacks: leaderelection.LeaderCallbacks{
 			OnStartedLeading: func(ctx context.Context) {
 				log.Println("我当上 Leader 了，开始分发逻辑")
@@ -91,110 +93,6 @@ func main() {
 
 	// 启动选举（会阻塞，直到进程退出）
 	leaderelection.RunOrDie(ctx, lec)
-
-	// 初始化时，把配置同步一遍
-	if err := distributeSecrets(ctx, clientset, cfg); err != nil {
-		log.Fatalf("初始化同步失败: %v", err)
-	}
-
-	// 监听 namespace 变化，有更新时就会响应，如果每隔10分钟把全量列表同步一遍。
-	factory := informers.NewSharedInformerFactory(clientset, time.Minute*10)
-	nsInformer := factory.Core().V1().Namespaces().Informer()
-
-	nsInformer.AddEventHandler(cache.ResourceEventHandlerFuncs{
-		AddFunc: func(obj interface{}) {
-			ns := obj.(*corev1.Namespace)
-			log.Printf("检测到新namespace: %s", ns.Name)
-			err := distributeSecrets(ctx, clientset, cfg)
-			if err != nil {
-				log.Printf("分发secret失败: %v", err)
-			}
-		},
-	})
-
-	stopCh := make(chan struct{})
-	defer close(stopCh)
-
-	factory.Start(stopCh)
-	factory.WaitForCacheSync(stopCh)
-
-	// 阻塞主线程，保持程序常驻
-	select {}
-
-}
-
-func loadConfig(path string) (*RegistryConfig, error) {
-	data, err := os.ReadFile(path)
-	if err != nil {
-		return nil, err
-	}
-	var cfg RegistryConfig
-	if err := yaml.Unmarshal(data, &cfg); err != nil {
-		return nil, err
-	}
-	return &cfg, nil
-}
-
-func distributeSecrets(ctx context.Context, clientset *kubernetes.Clientset, cfg *RegistryConfig) error {
-	// 列出所有 namespace
-	nsList, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
-	if err != nil {
-		return fmt.Errorf("列出 namespaces 失败: %w", err)
-	}
-	// 快速查表
-	existNS := map[string]bool{}
-	for _, ns := range nsList.Items {
-		existNS[ns.Name] = true
-	}
-
-	// 遍历每条 RegistryEntry
-	for _, reg := range cfg.Registries {
-		// 构造 .dockerconfigjson
-		auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", reg.Username, reg.Password)))
-		dockCfg := map[string]interface{}{
-			"auths": map[string]interface{}{
-				reg.Registry: map[string]string{
-					"username": reg.Username,
-					"password": reg.Password,
-					"auth":     auth,
-				},
-			},
-		}
-		raw, _ := json.Marshal(dockCfg)
-
-		for _, ns := range reg.Namespaces {
-			if ns != "*" && !existNS[ns] {
-				log.Printf("namespace %s 不存在，跳过", ns)
-				continue
-			}
-			secret := &corev1.Secret{
-				ObjectMeta: metav1.ObjectMeta{
-					Name:      reg.Name,
-					Namespace: ns,
-				},
-				Type: corev1.SecretTypeDockerConfigJson,
-				Data: map[string][]byte{
-					corev1.DockerConfigJsonKey: raw,
-				},
-			}
-
-			// Create or Update
-			if _, err := clientset.CoreV1().Secrets(ns).Get(ctx, reg.Name, metav1.GetOptions{}); err != nil {
-				if _, err := clientset.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
-					log.Printf("在 %s 创建 secret %s 失败: %v", ns, reg.Name, err)
-				} else {
-					log.Printf("在 %s 创建 secret %s 成功", ns, reg.Name)
-				}
-			} else {
-				if _, err := clientset.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
-					log.Printf("在 %s 更新 secret %s 失败: %v", ns, reg.Name, err)
-				} else {
-					log.Printf("在 %s 更新 secret %s 成功", ns, reg.Name)
-				}
-			}
-		}
-	}
-	return nil
 }
 
 // runDistributor 负责“leader”真正干的活：一次全量 + informer 持续监听
@@ -222,6 +120,95 @@ func runDistributor(ctx context.Context, clientset *kubernetes.Clientset, cfg *R
 	factory.Start(stopCh)
 	factory.WaitForCacheSync(stopCh)
 
-	// 阻塞直到 Context 被取消（比如 OnStoppedLeading 调用 os.Exit）
+	// 阻塞直到 Context 被取消（OnStoppedLeading 调用 os.Exit 前不会到这里）
 	<-ctx.Done()
+}
+
+func loadConfig(path string) (*RegistryConfig, error) {
+	data, err := os.ReadFile(path)
+	if err != nil {
+		return nil, err
+	}
+	var cfg RegistryConfig
+	if err := yaml.Unmarshal(data, &cfg); err != nil {
+		return nil, err
+	}
+	return &cfg, nil
+}
+
+// distributeSecrets 将所有指定的 RegistryEntry 分发到对应的 Namespace，支持通配符
+func distributeSecrets(ctx context.Context, clientset *kubernetes.Clientset, cfg *RegistryConfig) error {
+	// 列出所有 namespace
+	nsList, err := clientset.CoreV1().Namespaces().List(ctx, metav1.ListOptions{})
+	if err != nil {
+		return fmt.Errorf("列出 namespaces 失败: %w", err)
+	}
+	// 构建存在检测表
+	existNS := make(map[string]bool, len(nsList.Items))
+	for _, ns := range nsList.Items {
+		existNS[ns.Name] = true
+	}
+
+	// 遍历每条 RegistryEntry
+	for _, reg := range cfg.Registries {
+		// 构造 .dockerconfigjson
+		auth := base64.StdEncoding.EncodeToString([]byte(fmt.Sprintf("%s:%s", reg.Username, reg.Password)))
+		dockCfg := map[string]interface{}{"auths": map[string]interface{}{reg.Registry: map[string]string{
+			"username": reg.Username,
+			"password": reg.Password,
+			"auth":     auth,
+		}}}
+		raw, _ := json.Marshal(dockCfg)
+
+		// 生成目标 namespace 列表
+		var targets []string
+		if contains(reg.Namespaces, "*") {
+			for name := range existNS {
+				targets = append(targets, name)
+			}
+		} else {
+			targets = reg.Namespaces
+		}
+
+		// 分发到每个目标 namespace
+		for _, ns := range targets {
+			// 再次校验存在性
+			if !existNS[ns] {
+				log.Printf("namespace %s 不存在，跳过", ns)
+				continue
+			}
+
+			secret := &corev1.Secret{
+				ObjectMeta: metav1.ObjectMeta{Name: reg.Name, Namespace: ns},
+				Type:       corev1.SecretTypeDockerConfigJson,
+				Data:       map[string][]byte{corev1.DockerConfigJsonKey: raw},
+			}
+
+			// Create or Update
+			if _, err := clientset.CoreV1().Secrets(ns).Get(ctx, reg.Name, metav1.GetOptions{}); err != nil {
+				if _, err := clientset.CoreV1().Secrets(ns).Create(ctx, secret, metav1.CreateOptions{}); err != nil {
+					log.Printf("在 %s 创建 secret %s 失败: %v", ns, reg.Name, err)
+				} else {
+					log.Printf("在 %s 创建 secret %s 成功", ns, reg.Name)
+				}
+			} else {
+				if _, err := clientset.CoreV1().Secrets(ns).Update(ctx, secret, metav1.UpdateOptions{}); err != nil {
+					log.Printf("在 %s 更新 secret %s 失败: %v", ns, reg.Name, err)
+				} else {
+					log.Printf("在 %s 更新 secret %s 成功", ns, reg.Name)
+				}
+			}
+		}
+	}
+	return nil
+}
+
+// contains 判断 list 中是否包含 item
+func contains(list []string, item string) bool {
+	for _, v := range list {
+		if v == item {
+			return true
+		}
+	}
+	return false
 }
