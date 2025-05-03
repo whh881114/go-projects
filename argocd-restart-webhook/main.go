@@ -28,8 +28,8 @@ type SuccessResponse struct {
 }
 
 func main() {
-	http.HandleFunc("/restart", restartHandler)
-	log.Println("启动 Argo CD 重启服务，监听 :8080")
+	http.HandleFunc("/", restartHandler)
+	log.Println("启动服务，监听 :8080")
 	if err := http.ListenAndServe(":8080", nil); err != nil {
 		log.Fatalf("服务启动失败: %v", err)
 	}
