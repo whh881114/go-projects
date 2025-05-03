@@ -4,39 +4,25 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"log"
 	"net/http"
 	"strings"
 	"time"
 )
 
-// RequestBody 定义 POST 请求体结构
-// example:
-//
-//	{
-//	  "server": "https://argocd.example.com",
-//	  "token": "<ARGOCD_TOKEN>",
-//	  "app": "my-app",
-//	  "resources": [
-//	    "apps:Deployment:default/my-deploy",
-//	    "argoproj.io:Rollout:prod-rollout"
-//	  ],
-//	  "timeout": 10
-//	}
 type RequestBody struct {
 	Server    string   `json:"server"`
 	Token     string   `json:"token"`
 	App       string   `json:"app"`
 	Resources []string `json:"resources"`
-	Timeout   int      `json:"timeout"` // 可选，默认10秒
+	Timeout   int      `json:"timeout"`
 }
 
-// ErrorResponse 用于返回错误信息
 type ErrorResponse struct {
 	Error string `json:"error"`
 }
 
-// SuccessResponse 用于返回成功信息
 type SuccessResponse struct {
 	Message string `json:"message"`
 }
@@ -70,7 +56,6 @@ func restartHandler(w http.ResponseWriter, r *http.Request) {
 		timeout = 10
 	}
 
-	// 依次重启资源
 	for _, p := range reqBody.Resources {
 		if err := doRestart(reqBody.Server, reqBody.Token, reqBody.App, p, timeout); err != nil {
 			writeError(w, http.StatusInternalServerError, fmt.Sprintf("资源 %s 重启失败: %v", p, err))
@@ -79,7 +64,11 @@ func restartHandler(w http.ResponseWriter, r *http.Request) {
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(SuccessResponse{Message: "所有资源重启已触发"})
+	encoder := json.NewEncoder(w)
+	if err := encoder.Encode(SuccessResponse{Message: "所有资源重启已触发"}); err != nil {
+		log.Printf("响应写入失败: %v", err)
+		http.Error(w, fmt.Sprintf("写入响应失败: %v", err), http.StatusInternalServerError)
+	}
 }
 
 func validateReq(req RequestBody) error {
@@ -90,7 +79,6 @@ func validateReq(req RequestBody) error {
 }
 
 func doRestart(server, token, app, resource string, timeout int) error {
-	// resource 格式: <group>:<kind>:<namespace>/<name>
 	parts := strings.SplitN(resource, "/", 2)
 	if len(parts) != 2 {
 		return fmt.Errorf("格式错误: %s", resource)
@@ -119,16 +107,29 @@ func doRestart(server, token, app, resource string, timeout int) error {
 	if err != nil {
 		return err
 	}
-	defer resp.Body.Close()
+	defer func() {
+		if cerr := resp.Body.Close(); cerr != nil {
+			log.Printf("关闭响应体失败: %v", cerr)
+		}
+	}()
+
 	if resp.StatusCode != http.StatusOK {
-		return fmt.Errorf("HTTP %d", resp.StatusCode)
+		bodyBytes, _ := io.ReadAll(resp.Body)
+		return fmt.Errorf("HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(bodyBytes)))
 	}
+
 	return nil
 }
 
-// writeError 统一写错误响应
 func writeError(w http.ResponseWriter, code int, msg string) {
 	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
-	json.NewEncoder(w).Encode(ErrorResponse{Error: msg})
+	encoder := json.NewEncoder(w)
+	if err := encoder.Encode(ErrorResponse{Error: msg}); err != nil {
+		log.Printf("写入错误响应失败: %v", err)
+	}
 }
+
+// RBAC 配置示例：
+// p, role:restart-only, applications, action/*, *, allow
+// g, syncbot, role:restart-only
