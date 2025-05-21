@@ -7,7 +7,6 @@ import (
 	"net/http"
 	"os"
 	"regexp"
-	"sort"
 	"time"
 )
 
@@ -28,7 +27,6 @@ type artifact struct {
 	Tags []struct {
 		Name string `json:"name"`
 	} `json:"tags"`
-	PushTime time.Time `json:"push_time"`
 }
 
 func newHarborClient() *harborClient {
@@ -46,6 +44,7 @@ func newHarborClient() *harborClient {
 	}
 }
 
+// check if image exists by listing artifacts
 func (h *harborClient) imageExists(project, repo string) (bool, error) {
 	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1", h.baseURL, project, repo)
 	req, err := http.NewRequest("GET", url, nil)
@@ -71,8 +70,9 @@ func (h *harborClient) imageExists(project, repo string) (bool, error) {
 	return len(arts) > 0, nil
 }
 
-func (h *harborClient) getBestTag(project, repo string) (string, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=100&with_tag=true", h.baseURL, project, repo)
+// get latest tag by sorting artifacts by push_time descending
+func (h *harborClient) getLatestTag(project, repo string) (string, error) {
+	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1&sort=pushed_time:desc&with_tag=true", h.baseURL, project, repo)
 	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return "", err
@@ -90,37 +90,13 @@ func (h *harborClient) getBestTag(project, repo string) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&arts); err != nil {
 		return "", err
 	}
-
-	var latestExists bool
-	var commitTags []struct {
-		Tag  string
-		Time time.Time
+	if len(arts) == 0 || len(arts[0].Tags) == 0 {
+		return "", fmt.Errorf("no tags found")
 	}
-	commitRegex := regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
-	for _, art := range arts {
-		for _, t := range art.Tags {
-			if t.Name == "latest" {
-				latestExists = true
-			} else if commitRegex.MatchString(t.Name) {
-				commitTags = append(commitTags, struct {
-					Tag  string
-					Time time.Time
-				}{t.Name, art.PushTime})
-			}
-		}
-	}
-	if latestExists {
-		return "latest", nil
-	}
-	if len(commitTags) == 0 {
-		return "", fmt.Errorf("no valid tags found")
-	}
-	sort.Slice(commitTags, func(i, j int) bool {
-		return commitTags[i].Time.After(commitTags[j].Time)
-	})
-	return commitTags[0].Tag, nil
+	return arts[0].Tags[0].Name, nil
 }
 
+// check if a specific tag exists
 func (h *harborClient) tagExists(project, repo, tag string) (bool, error) {
 	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s", h.baseURL, project, repo, tag)
 	req, err := http.NewRequest("GET", url, nil)
@@ -151,6 +127,8 @@ func handler(h *harborClient) http.HandlerFunc {
 			http.Error(w, "project, image and tag are required", http.StatusBadRequest)
 			return
 		}
+
+		// check image existence
 		exists, err := h.imageExists(project, repo)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -160,15 +138,19 @@ func handler(h *harborClient) http.HandlerFunc {
 			json.NewEncoder(w).Encode(tagResponse{project, repo, "image-not-exist"})
 			return
 		}
+
+		// latest tag
 		if tag == "latest" {
-			bestTag, err := h.getBestTag(project, repo)
+			latest, err := h.getLatestTag(project, repo)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			json.NewEncoder(w).Encode(tagResponse{project, repo, bestTag})
+			json.NewEncoder(w).Encode(tagResponse{project, repo, latest})
 			return
 		}
+
+		// git commit pattern
 		commitRegex := regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 		if commitRegex.MatchString(tag) {
 			exists, err := h.tagExists(project, repo, tag)
@@ -183,13 +165,15 @@ func handler(h *harborClient) http.HandlerFunc {
 			}
 			return
 		}
+
+		// default: tag format invalid or not found
 		json.NewEncoder(w).Encode(tagResponse{project, repo, "tag-not-exist"})
 	}
 }
 
 func main() {
 	client := newHarborClient()
-	http.HandleFunc("/tag", handler(client))
+	http.HandleFunc("/", handler(client))
 	log.Println("Starting server on :8080...")
 	log.Fatal(http.ListenAndServe(":8080", nil))
 }
