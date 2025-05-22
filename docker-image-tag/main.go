@@ -34,9 +34,7 @@ func init() {
 	harborURL = strings.TrimRight(os.Getenv("HARBOR_URL"), "/")
 	harborUser = os.Getenv("HARBOR_USERNAME")
 	harborPassword = os.Getenv("HARBOR_TOKEN")
-	if harborURL == "" || harborUser == "" || harborPassword == "" {
-		log.Fatal("Environment variables HARBOR_URL, HARBOR_USERNAME and HARBOR_TOKEN must be set")
-	}
+	// 不在 init 时 Fatal，延迟到 Handler 内做返回处理
 }
 
 func main() {
@@ -47,6 +45,12 @@ func main() {
 }
 
 func queryHandler(w http.ResponseWriter, r *http.Request) {
+	// 环境变量检查
+	if harborURL == "" || harborUser == "" || harborPassword == "" {
+		http.Error(w, "Configuration error: HARBOR_URL, HARBOR_USERNAME or HARBOR_TOKEN is not set", http.StatusInternalServerError)
+		return
+	}
+
 	// Parse query params
 	project := r.URL.Query().Get("project")
 	image := r.URL.Query().Get("image")
