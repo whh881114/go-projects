@@ -5,8 +5,11 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
+	"sort"
+	"strings"
 	"time"
 )
 
@@ -27,6 +30,7 @@ type artifact struct {
 	Tags []struct {
 		Name string `json:"name"`
 	} `json:"tags"`
+	PushTime time.Time `json:"push_time"`
 }
 
 func newHarborClient() *harborClient {
@@ -44,10 +48,26 @@ func newHarborClient() *harborClient {
 	}
 }
 
-// check if image exists by listing artifacts
+// escapePath 转义 URL 路径段
+func escapePath(parts ...string) string {
+	for i, p := range parts {
+		parts[i] = url.PathEscape(p)
+	}
+	return strings.Join(parts, "/")
+}
+
+// apiURL 构建带转义的 API 路径
+func (h *harborClient) apiURL(pathSegments ...string) string {
+	path := escapePath(pathSegments...)
+	return fmt.Sprintf("%s/api/v2.0/%s", h.baseURL, path)
+}
+
 func (h *harborClient) imageExists(project, repo string) (bool, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1", h.baseURL, project, repo)
-	req, err := http.NewRequest("GET", url, nil)
+	endpoint := fmt.Sprintf("%s?%s", h.apiURL(
+		"projects", project,
+		"repositories", repo, "artifacts",
+	), "page=1&page_size=1")
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return false, err
 	}
@@ -70,10 +90,12 @@ func (h *harborClient) imageExists(project, repo string) (bool, error) {
 	return len(arts) > 0, nil
 }
 
-// get latest tag by sorting artifacts by push_time descending
-func (h *harborClient) getLatestTag(project, repo string) (string, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1&sort=pushed_time:desc&with_tag=true", h.baseURL, project, repo)
-	req, err := http.NewRequest("GET", url, nil)
+func (h *harborClient) getBestTag(project, repo string) (string, error) {
+	endpoint := fmt.Sprintf("%s?%s", h.apiURL(
+		"projects", project,
+		"repositories", repo, "artifacts",
+	), "page=1&page_size=100&with_tag=true")
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return "", err
 	}
@@ -90,16 +112,39 @@ func (h *harborClient) getLatestTag(project, repo string) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&arts); err != nil {
 		return "", err
 	}
-	if len(arts) == 0 || len(arts[0].Tags) == 0 {
-		return "", fmt.Errorf("no tags found")
+
+	var latestExists bool
+	var commitTags []struct {
+		Tag  string
+		Time time.Time
 	}
-	return arts[0].Tags[0].Name, nil
+	commitRegex := regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+	for _, art := range arts {
+		for _, t := range art.Tags {
+			if t.Name == "latest" {
+				latestExists = true
+			} else if commitRegex.MatchString(t.Name) {
+				commitTags = append(commitTags, struct {
+					Tag  string
+					Time time.Time
+				}{t.Name, art.PushTime})
+			}
+		}
+	}
+	if latestExists {
+		return "latest", nil
+	}
+	if len(commitTags) == 0 {
+		return "", fmt.Errorf("no valid tags found")
+	}
+	sort.Slice(commitTags, func(i, j int) bool { return commitTags[i].Time.After(commitTags[j].Time) })
+	return commitTags[0].Tag, nil
 }
 
-// check if a specific tag exists
 func (h *harborClient) tagExists(project, repo, tag string) (bool, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s", h.baseURL, project, repo, tag)
-	req, err := http.NewRequest("GET", url, nil)
+	endpoint := h.apiURL("projects", project,
+		"repositories", repo, "artifacts", tag)
+	req, err := http.NewRequest("GET", endpoint, nil)
 	if err != nil {
 		return false, err
 	}
@@ -128,7 +173,6 @@ func handler(h *harborClient) http.HandlerFunc {
 			return
 		}
 
-		// check image existence
 		exists, err := h.imageExists(project, repo)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -139,18 +183,16 @@ func handler(h *harborClient) http.HandlerFunc {
 			return
 		}
 
-		// latest tag
 		if tag == "latest" {
-			latest, err := h.getLatestTag(project, repo)
+			bestTag, err := h.getBestTag(project, repo)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			json.NewEncoder(w).Encode(tagResponse{project, repo, latest})
+			json.NewEncoder(w).Encode(tagResponse{project, repo, bestTag})
 			return
 		}
 
-		// git commit pattern
 		commitRegex := regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 		if commitRegex.MatchString(tag) {
 			exists, err := h.tagExists(project, repo, tag)
@@ -166,7 +208,7 @@ func handler(h *harborClient) http.HandlerFunc {
 			return
 		}
 
-		// default: tag format invalid or not found
+		// 默认：格式不匹配
 		json.NewEncoder(w).Encode(tagResponse{project, repo, "tag-not-exist"})
 	}
 }
