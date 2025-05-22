@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
 	"time"
@@ -30,14 +31,14 @@ type artifact struct {
 }
 
 func newHarborClient() *harborClient {
-	url := os.Getenv("HARBOR_URL")
+	baseURL := os.Getenv("HARBOR_URL")
 	user := os.Getenv("HARBOR_USER")
 	token := os.Getenv("HARBOR_TOKEN")
-	if url == "" || user == "" || token == "" {
+	if baseURL == "" || user == "" || token == "" {
 		log.Fatalf("HARBOR_URL, HARBOR_USER and HARBOR_TOKEN must be set")
 	}
 	return &harborClient{
-		baseURL: url,
+		baseURL: baseURL,
 		user:    user,
 		token:   token,
 		client:  &http.Client{Timeout: 10 * time.Second},
@@ -46,8 +47,10 @@ func newHarborClient() *harborClient {
 
 // check if image exists by listing artifacts
 func (h *harborClient) imageExists(project, repo string) (bool, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1", h.baseURL, project, repo)
-	req, err := http.NewRequest("GET", url, nil)
+	repoEscaped := url.PathEscape(repo)
+	apiURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1", h.baseURL, project, repoEscaped)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return false, err
 	}
@@ -72,8 +75,10 @@ func (h *harborClient) imageExists(project, repo string) (bool, error) {
 
 // get latest tag by sorting artifacts by push_time descending
 func (h *harborClient) getLatestTag(project, repo string) (string, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1&sort=pushed_time:desc&with_tag=true", h.baseURL, project, repo)
-	req, err := http.NewRequest("GET", url, nil)
+	repoEscaped := url.PathEscape(repo)
+	apiURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1&sort=pushed_time:desc&with_tag=true", h.baseURL, project, repoEscaped)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return "", err
 	}
@@ -98,8 +103,10 @@ func (h *harborClient) getLatestTag(project, repo string) (string, error) {
 
 // check if a specific tag exists
 func (h *harborClient) tagExists(project, repo, tag string) (bool, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s", h.baseURL, project, repo, tag)
-	req, err := http.NewRequest("GET", url, nil)
+	repoEscaped := url.PathEscape(repo)
+	apiURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s", h.baseURL, project, repoEscaped, tag)
+
+	req, err := http.NewRequest("GET", apiURL, nil)
 	if err != nil {
 		return false, err
 	}
