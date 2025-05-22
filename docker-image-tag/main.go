@@ -5,154 +5,175 @@ import (
 	"fmt"
 	"log"
 	"net/http"
-	"net/url"
 	"os"
 	"regexp"
-	"strings"
+	"time"
 )
 
-var (
-	harborURL      string
-	harborUser     string
-	harborPassword string
-	httpClient     = &http.Client{}
-	// Git commit regex: 7 to 40 hex characters
-	commitRe = regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
-)
+type harborClient struct {
+	baseURL string
+	user    string
+	token   string
+	client  *http.Client
+}
 
-type response struct {
+type tagResponse struct {
 	Project string `json:"project"`
 	Image   string `json:"image"`
 	Tag     string `json:"tag"`
 }
 
-type harborTag struct {
-	Name string `json:"name"`
+type artifact struct {
+	Tags []struct {
+		Name string `json:"name"`
+	} `json:"tags"`
 }
 
-func init() {
-	harborURL = strings.TrimRight(os.Getenv("HARBOR_URL"), "/")
-	harborUser = os.Getenv("HARBOR_USERNAME")
-	harborPassword = os.Getenv("HARBOR_TOKEN")
-	// 不在 init 时 Fatal，延迟到 Handler 内做返回处理
+func newHarborClient() *harborClient {
+	url := os.Getenv("HARBOR_URL")
+	user := os.Getenv("HARBOR_USER")
+	token := os.Getenv("HARBOR_TOKEN")
+	if url == "" || user == "" || token == "" {
+		log.Fatalf("HARBOR_URL, HARBOR_USER and HARBOR_TOKEN must be set")
+	}
+	return &harborClient{
+		baseURL: url,
+		user:    user,
+		token:   token,
+		client:  &http.Client{Timeout: 10 * time.Second},
+	}
 }
 
-func main() {
-	http.HandleFunc("/query", queryHandler)
-	addr := ":8080"
-	log.Printf("Starting server at %s...", addr)
-	log.Fatal(http.ListenAndServe(addr, nil))
-}
-
-func queryHandler(w http.ResponseWriter, r *http.Request) {
-	// 环境变量检查
-	if harborURL == "" || harborUser == "" || harborPassword == "" {
-		http.Error(w, "Configuration error: HARBOR_URL, HARBOR_USERNAME or HARBOR_TOKEN is not set", http.StatusInternalServerError)
-		return
-	}
-
-	// Parse query params
-	project := r.URL.Query().Get("project")
-	image := r.URL.Query().Get("image")
-	tag := r.URL.Query().Get("tag")
-	if project == "" || image == "" || tag == "" {
-		http.Error(w, "Missing project, image or tag parameter", http.StatusBadRequest)
-		return
-	}
-
-	// Escape path segments to handle special characters
-	escProject := url.PathEscape(project)
-	escImage := url.PathEscape(image)
-
-	// Check if image exists by fetching at least one tag
-	listURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/tags?page_size=1&page=1", harborURL, escProject, escImage)
-	tags, err := callHarborList(listURL)
-	if err != nil {
-		respondJSON(w, response{Project: project, Image: image, Tag: "image-not-exist"})
-		return
-	}
-
-	// If tag == "latest", return the name of the first (latest) tag
-	if tag == "latest" {
-		if len(tags) > 0 {
-			respondJSON(w, response{Project: project, Image: image, Tag: tags[0].Name})
-		} else {
-			respondJSON(w, response{Project: project, Image: image, Tag: "no-tags-found"})
-		}
-		return
-	}
-
-	// If tag matches Git commit SHA
-	if commitRe.MatchString(tag) {
-		specURL := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/tags/%s", harborURL, escProject, escImage, url.PathEscape(tag))
-		exists, err := callHarborExist(specURL)
-		if err != nil || !exists {
-			respondJSON(w, response{Project: project, Image: image, Tag: "tag-not-exist"})
-		} else {
-			respondJSON(w, response{Project: project, Image: image, Tag: tag})
-		}
-		return
-	}
-
-	// Fallback: return provided tag
-	respondJSON(w, response{Project: project, Image: image, Tag: tag})
-}
-
-// callHarborList fetches list of tags, returns error if HTTP status >=400
-func callHarborList(fullURL string) ([]harborTag, error) {
-	req, err := http.NewRequest("GET", fullURL, nil)
-	if err != nil {
-		return nil, err
-	}
-	req.SetBasicAuth(harborUser, harborPassword)
-
-	resp, err := httpClient.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusNotFound {
-		return nil, fmt.Errorf("repository not found")
-	}
-	if resp.StatusCode >= 400 {
-		return nil, fmt.Errorf("error status: %d", resp.StatusCode)
-	}
-
-	var tags []harborTag
-	if err := json.NewDecoder(resp.Body).Decode(&tags); err != nil {
-		return nil, err
-	}
-	return tags, nil
-}
-
-// callHarborExist checks if specific tag exists (HTTP 200)
-func callHarborExist(fullURL string) (bool, error) {
-	req, err := http.NewRequest("GET", fullURL, nil)
+// check if image exists by listing artifacts
+func (h *harborClient) imageExists(project, repo string) (bool, error) {
+	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1", h.baseURL, project, repo)
+	req, err := http.NewRequest("GET", url, nil)
 	if err != nil {
 		return false, err
 	}
-	req.SetBasicAuth(harborUser, harborPassword)
-
-	resp, err := httpClient.Do(req)
+	req.SetBasicAuth(h.user, h.token)
+	resp, err := h.client.Do(req)
 	if err != nil {
 		return false, err
 	}
 	defer resp.Body.Close()
-
-	if resp.StatusCode == http.StatusOK {
-		return true, nil
-	}
 	if resp.StatusCode == http.StatusNotFound {
 		return false, nil
 	}
-	return false, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	var arts []artifact
+	if err := json.NewDecoder(resp.Body).Decode(&arts); err != nil {
+		return false, err
+	}
+	return len(arts) > 0, nil
 }
 
-// respondJSON writes JSON response
-func respondJSON(w http.ResponseWriter, data response) {
-	w.Header().Set("Content-Type", "application/json")
-	if err := json.NewEncoder(w).Encode(data); err != nil {
-		http.Error(w, "failed to encode response", http.StatusInternalServerError)
+// get latest tag by sorting artifacts by push_time descending
+func (h *harborClient) getLatestTag(project, repo string) (string, error) {
+	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1&sort=pushed_time:desc&with_tag=true", h.baseURL, project, repo)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return "", err
 	}
+	req.SetBasicAuth(h.user, h.token)
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return "", err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode != http.StatusOK {
+		return "", fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	var arts []artifact
+	if err := json.NewDecoder(resp.Body).Decode(&arts); err != nil {
+		return "", err
+	}
+	if len(arts) == 0 || len(arts[0].Tags) == 0 {
+		return "", fmt.Errorf("no tags found")
+	}
+	return arts[0].Tags[0].Name, nil
+}
+
+// check if a specific tag exists
+func (h *harborClient) tagExists(project, repo, tag string) (bool, error) {
+	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s", h.baseURL, project, repo, tag)
+	req, err := http.NewRequest("GET", url, nil)
+	if err != nil {
+		return false, err
+	}
+	req.SetBasicAuth(h.user, h.token)
+	resp, err := h.client.Do(req)
+	if err != nil {
+		return false, err
+	}
+	defer resp.Body.Close()
+	if resp.StatusCode == http.StatusNotFound {
+		return false, nil
+	}
+	if resp.StatusCode != http.StatusOK {
+		return false, fmt.Errorf("unexpected status: %d", resp.StatusCode)
+	}
+	return true, nil
+}
+
+func handler(h *harborClient) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		project := r.URL.Query().Get("project")
+		repo := r.URL.Query().Get("image")
+		tag := r.URL.Query().Get("tag")
+		if project == "" || repo == "" || tag == "" {
+			http.Error(w, "project, image and tag are required", http.StatusBadRequest)
+			return
+		}
+
+		// check image existence
+		exists, err := h.imageExists(project, repo)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusInternalServerError)
+			return
+		}
+		if !exists {
+			json.NewEncoder(w).Encode(tagResponse{project, repo, "image-not-exist"})
+			return
+		}
+
+		// latest tag
+		if tag == "latest" {
+			latest, err := h.getLatestTag(project, repo)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			json.NewEncoder(w).Encode(tagResponse{project, repo, latest})
+			return
+		}
+
+		// git commit pattern
+		commitRegex := regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+		if commitRegex.MatchString(tag) {
+			exists, err := h.tagExists(project, repo, tag)
+			if err != nil {
+				http.Error(w, err.Error(), http.StatusInternalServerError)
+				return
+			}
+			if exists {
+				json.NewEncoder(w).Encode(tagResponse{project, repo, tag})
+			} else {
+				json.NewEncoder(w).Encode(tagResponse{project, repo, "tag-not-exist"})
+			}
+			return
+		}
+
+		// default: tag format invalid or not found
+		json.NewEncoder(w).Encode(tagResponse{project, repo, "tag-not-exist"})
+	}
+}
+
+func main() {
+	client := newHarborClient()
+	http.HandleFunc("/", handler(client))
+	log.Println("Starting server on :8080...")
+	log.Fatal(http.ListenAndServe(":8080", nil))
 }
