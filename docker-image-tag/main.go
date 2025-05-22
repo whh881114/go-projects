@@ -13,10 +13,10 @@ import (
 )
 
 type harborClient struct {
-	base    *url.URL
-	user    string
-	token   string
-	client  *http.Client
+	base   *url.URL
+	user   string
+	token  string
+	client *http.Client
 }
 
 type tagResponse struct {
@@ -26,8 +26,10 @@ type tagResponse struct {
 }
 
 type artifact struct {
-	Tags     []struct{ Name string `json:"name"` } `json:"tags"`
-	PushTime time.Time                     `json:"push_time"`
+	Tags []struct {
+		Name string `json:"name"`
+	} `json:"tags"`
+	PushTime time.Time `json:"push_time"`
 }
 
 func newHarborClient() *harborClient {
@@ -49,13 +51,12 @@ func newHarborClient() *harborClient {
 	}
 }
 
-// newRequest 构建一个带保留原始路径编码的请求
+// newRequest 构建一个保留原始 %2F 的请求
 func (h *harborClient) newRequest(method, rawPath, query string) (*http.Request, error) {
-	// rawPath 应包含前导 '/'
 	u := &url.URL{
-		Scheme: h.base.Scheme,
-		Host:   h.base.Host,
-		Opaque: rawPath,
+		Scheme:   h.base.Scheme,
+		Host:     h.base.Host,
+		Opaque:   rawPath,
 		RawQuery: query,
 	}
 	req := &http.Request{
@@ -67,7 +68,6 @@ func (h *harborClient) newRequest(method, rawPath, query string) (*http.Request,
 }
 
 func (h *harborClient) imageExists(project, repo string) (bool, error) {
-	// 手动将 repo 的 '/' 转为 '%2F'
 	repoEsc := url.PathEscape(repo)
 	path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts", project, repoEsc)
 	req, err := h.newRequest("GET", path, "page=1&page_size=1")
@@ -113,14 +113,20 @@ func (h *harborClient) getBestTag(project, repo string) (string, error) {
 	}
 
 	var latestExists bool
-	var commitTags []struct{ Tag string; Time time.Time }
+	var commitTags []struct {
+		Tag  string
+		Time time.Time
+	}
 	commitRegex := regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 	for _, art := range arts {
 		for _, t := range art.Tags {
 			if t.Name == "latest" {
 				latestExists = true
 			} else if commitRegex.MatchString(t.Name) {
-				commitTags = append(commitTags, struct{ Tag string; Time time.Time }{t.Name, art.PushTime})
+				commitTags = append(commitTags, struct {
+					Tag  string
+					Time time.Time
+				}{t.Name, art.PushTime})
 			}
 		}
 	}
@@ -172,7 +178,7 @@ func handler(h *harborClient) http.HandlerFunc {
 			return
 		}
 		if !exists {
-			json.NewEncoder(w).Encode(tagResponse{project, repo, "image-not-exist"})
+			json.NewEncoder(w).Encode(tagResponse{Project: project, Image: repo, Tag: "image-not-exist"})
 			return
 		}
 
@@ -182,7 +188,7 @@ func handler(h *harborClient) http.HandlerFunc {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			json.NewEncoder(w).Encode(tagResponse{project, repo, bestTag})
+			json.NewEncoder(w).Encode(tagResponse{Project: project, Image: repo, Tag: bestTag})
 			return
 		}
 
@@ -194,14 +200,14 @@ func handler(h *harborClient) http.HandlerFunc {
 				return
 			}
 			if exists {
-				json.NewEncoder(w).Encode	tagResponse{project, repo, tag})
+				json.NewEncoder(w).Encode(tagResponse{Project: project, Image: repo, Tag: tag})
 			} else {
-				json.NewEncoder(w).Encode	tagResponse{project, repo, "tag-not-exist"})
+				json.NewEncoder(w).Encode(tagResponse{Project: project, Image: repo, Tag: "tag-not-exist"})
 			}
 			return
 		}
 
-		json.NewEncoder(w).Encode(tagResponse{project, repo, "tag-not-exist"})
+		json.NewEncoder(w).Encode(tagResponse{Project: project, Image: repo, Tag: "tag-not-exist"})
 	}
 }
 
