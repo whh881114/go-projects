@@ -5,13 +5,15 @@ import (
 	"fmt"
 	"log"
 	"net/http"
+	"net/url"
 	"os"
 	"regexp"
+	"sort"
 	"time"
 )
 
 type harborClient struct {
-	baseURL string
+	base    *url.URL
 	user    string
 	token   string
 	client  *http.Client
@@ -24,34 +26,54 @@ type tagResponse struct {
 }
 
 type artifact struct {
-	Tags []struct {
-		Name string `json:"name"`
-	} `json:"tags"`
+	Tags     []struct{ Name string `json:"name"` } `json:"tags"`
+	PushTime time.Time                     `json:"push_time"`
 }
 
 func newHarborClient() *harborClient {
-	url := os.Getenv("HARBOR_URL")
+	raw := os.Getenv("HARBOR_URL")
 	user := os.Getenv("HARBOR_USER")
 	token := os.Getenv("HARBOR_TOKEN")
-	if url == "" || user == "" || token == "" {
+	if raw == "" || user == "" || token == "" {
 		log.Fatalf("HARBOR_URL, HARBOR_USER and HARBOR_TOKEN must be set")
 	}
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		log.Fatalf("invalid HARBOR_URL: %v", err)
+	}
 	return &harborClient{
-		baseURL: url,
-		user:    user,
-		token:   token,
-		client:  &http.Client{Timeout: 10 * time.Second},
+		base:   parsed,
+		user:   user,
+		token:  token,
+		client: &http.Client{Timeout: 10 * time.Second},
 	}
 }
 
-// check if image exists by listing artifacts
+// newRequest 构建一个带保留原始路径编码的请求
+func (h *harborClient) newRequest(method, rawPath, query string) (*http.Request, error) {
+	// rawPath 应包含前导 '/'
+	u := &url.URL{
+		Scheme: h.base.Scheme,
+		Host:   h.base.Host,
+		Opaque: rawPath,
+		RawQuery: query,
+	}
+	req := &http.Request{
+		Method: method,
+		URL:    u,
+	}
+	req.SetBasicAuth(h.user, h.token)
+	return req, nil
+}
+
 func (h *harborClient) imageExists(project, repo string) (bool, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1", h.baseURL, project, repo)
-	req, err := http.NewRequest("GET", url, nil)
+	// 手动将 repo 的 '/' 转为 '%2F'
+	repoEsc := url.PathEscape(repo)
+	path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts", project, repoEsc)
+	req, err := h.newRequest("GET", path, "page=1&page_size=1")
 	if err != nil {
 		return false, err
 	}
-	req.SetBasicAuth(h.user, h.token)
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return false, err
@@ -70,14 +92,13 @@ func (h *harborClient) imageExists(project, repo string) (bool, error) {
 	return len(arts) > 0, nil
 }
 
-// get latest tag by sorting artifacts by push_time descending
-func (h *harborClient) getLatestTag(project, repo string) (string, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts?page=1&page_size=1&sort=pushed_time:desc&with_tag=true", h.baseURL, project, repo)
-	req, err := http.NewRequest("GET", url, nil)
+func (h *harborClient) getBestTag(project, repo string) (string, error) {
+	repoEsc := url.PathEscape(repo)
+	path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts", project, repoEsc)
+	req, err := h.newRequest("GET", path, "page=1&page_size=100&with_tag=true")
 	if err != nil {
 		return "", err
 	}
-	req.SetBasicAuth(h.user, h.token)
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return "", err
@@ -90,20 +111,37 @@ func (h *harborClient) getLatestTag(project, repo string) (string, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&arts); err != nil {
 		return "", err
 	}
-	if len(arts) == 0 || len(arts[0].Tags) == 0 {
-		return "", fmt.Errorf("no tags found")
+
+	var latestExists bool
+	var commitTags []struct{ Tag string; Time time.Time }
+	commitRegex := regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
+	for _, art := range arts {
+		for _, t := range art.Tags {
+			if t.Name == "latest" {
+				latestExists = true
+			} else if commitRegex.MatchString(t.Name) {
+				commitTags = append(commitTags, struct{ Tag string; Time time.Time }{t.Name, art.PushTime})
+			}
+		}
 	}
-	return arts[0].Tags[0].Name, nil
+	if latestExists {
+		return "latest", nil
+	}
+	if len(commitTags) == 0 {
+		return "", fmt.Errorf("no valid tags found")
+	}
+	sort.Slice(commitTags, func(i, j int) bool { return commitTags[i].Time.After(commitTags[j].Time) })
+	return commitTags[0].Tag, nil
 }
 
-// check if a specific tag exists
 func (h *harborClient) tagExists(project, repo, tag string) (bool, error) {
-	url := fmt.Sprintf("%s/api/v2.0/projects/%s/repositories/%s/artifacts/%s", h.baseURL, project, repo, tag)
-	req, err := http.NewRequest("GET", url, nil)
+	repoEsc := url.PathEscape(repo)
+	tagEsc := url.PathEscape(tag)
+	path := fmt.Sprintf("/api/v2.0/projects/%s/repositories/%s/artifacts/%s", project, repoEsc, tagEsc)
+	req, err := h.newRequest("GET", path, "")
 	if err != nil {
 		return false, err
 	}
-	req.SetBasicAuth(h.user, h.token)
 	resp, err := h.client.Do(req)
 	if err != nil {
 		return false, err
@@ -128,7 +166,6 @@ func handler(h *harborClient) http.HandlerFunc {
 			return
 		}
 
-		// check image existence
 		exists, err := h.imageExists(project, repo)
 		if err != nil {
 			http.Error(w, err.Error(), http.StatusInternalServerError)
@@ -139,18 +176,16 @@ func handler(h *harborClient) http.HandlerFunc {
 			return
 		}
 
-		// latest tag
 		if tag == "latest" {
-			latest, err := h.getLatestTag(project, repo)
+			bestTag, err := h.getBestTag(project, repo)
 			if err != nil {
 				http.Error(w, err.Error(), http.StatusInternalServerError)
 				return
 			}
-			json.NewEncoder(w).Encode(tagResponse{project, repo, latest})
+			json.NewEncoder(w).Encode(tagResponse{project, repo, bestTag})
 			return
 		}
 
-		// git commit pattern
 		commitRegex := regexp.MustCompile(`^[0-9a-fA-F]{7,40}$`)
 		if commitRegex.MatchString(tag) {
 			exists, err := h.tagExists(project, repo, tag)
@@ -159,14 +194,13 @@ func handler(h *harborClient) http.HandlerFunc {
 				return
 			}
 			if exists {
-				json.NewEncoder(w).Encode(tagResponse{project, repo, tag})
+				json.NewEncoder(w).Encode	tagResponse{project, repo, tag})
 			} else {
-				json.NewEncoder(w).Encode(tagResponse{project, repo, "tag-not-exist"})
+				json.NewEncoder(w).Encode	tagResponse{project, repo, "tag-not-exist"})
 			}
 			return
 		}
 
-		// default: tag format invalid or not found
 		json.NewEncoder(w).Encode(tagResponse{project, repo, "tag-not-exist"})
 	}
 }
