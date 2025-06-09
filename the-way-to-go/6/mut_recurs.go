@@ -26,6 +26,5 @@ func RevSign(nr int) int {
 	if nr < 0 {
 		return -nr
 	}
-
 	return nr
 }
