@@ -88,12 +88,98 @@ type StringMap map[string]string
 type Handler func(w http.ResponseWriter, r *http.Request)
 
 type Person struct {
+Name string
+Age  int
+}
+
+type Service interface {
+Start() error
+Stop() error
+}
+```
+
+---
+
+## 🛠️ Go 中各种类型的声明方式与初始化写法
+
+### 🔸 Slice 声明与初始化
+
+```go
+var s1 []int              // 声明但未初始化（nil）
+s2 := []int{1, 2, 3}      // 直接初始化
+s3 := make([]int, 5)      // 长度为 5 的切片，元素为 0
+```
+
+---
+
+### 🔸 Map 声明与初始化
+
+```go
+var m1 map[string]int         // nil map，不能直接写入
+m2 := map[string]int{}        // 空 map，可写入
+m3 := make(map[string]int)    // 推荐写法，可写入
+m4 := map[int][]int{
+    1: {1, 2},
+    2: {3, 4},
+}
+```
+
+---
+
+### 🔸 Struct 声明与初始化
+
+```go
+type Person struct {
     Name string
     Age  int
 }
 
-type Service interface {
-    Start() error
-    Stop() error
+var p1 Person                         // 零值初始化
+p2 := Person{"Alice", 30}            // 顺序初始化
+p3 := Person{Name: "Bob", Age: 25}   // 字段名初始化
+p4 := &Person{Name: "Eve"}           // 指针初始化
+```
+
+---
+
+### 🔸 Channel 声明与初始化
+
+```go
+var ch1 chan int           // nil 通道，不能用
+ch2 := make(chan int)      // 双向通道
+ch3 := make(chan int, 10)  // 有缓冲通道
+```
+
+---
+
+### 🔸 函数类型声明与赋值
+
+```go
+var f1 func(int) int
+f1 = func(x int) int {
+    return x * 2
 }
+
+type Handler func(string) error
+var h Handler = func(s string) error {
+    fmt.Println(s)
+    return nil
+}
+```
+
+---
+
+### 🔸 Interface 声明与使用
+
+```go
+type Runner interface {
+    Run() error
+}
+
+type Task struct{}
+func (t Task) Run() error {
+    return nil
+}
+
+var r Runner = Task{}     // 接口变量赋值
 ```
