@@ -6,9 +6,9 @@ import (
 )
 
 type TagType struct {
-	field1 bool   "An important answer.\n"
-	field2 string "The name of the thing.\n"
-	field3 int    "How much there are.\n"
+	field1 bool   "An important answer."
+	field2 string "The name of the thing."
+	field3 int    "How much there are."
 }
 
 func main() {
@@ -21,5 +21,5 @@ func main() {
 func refTag(tt TagType, ix int) {
 	ttType := reflect.TypeOf(tt)
 	ixField := ttType.Field(ix)
-	fmt.Printf("%v", ixField.Tag)
+	fmt.Printf("%v\n", ixField.Tag)
 }
