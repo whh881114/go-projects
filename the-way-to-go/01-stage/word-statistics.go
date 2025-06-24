@@ -36,7 +36,7 @@ func main() {
 	// 按母顺序顺序打印
 	var words []string
 	words = make([]string, 0)
-	for k, _ := range statisticsMap {
+	for k := range statisticsMap {
 		words = append(words, k)
 	}
 	sort.Strings(words)
