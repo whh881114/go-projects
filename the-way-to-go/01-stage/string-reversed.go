@@ -13,12 +13,13 @@ func main() {
 		panic(err)
 	}
 
+	// 把字符串转成 rune 切片（每个 rune 是一个 Unicode 字符）
 	tmp := []rune(originalString)
 	for i, j := 0, len(tmp)-1; i < j; i, j = i+1, j-1 {
 		tmp[i], tmp[j] = tmp[j], tmp[i]
 	}
 
+	// 转回字符串并输出
 	reversedString = string(tmp)
-
-	fmt.Printf("%s\n", reversedString)
+	fmt.Printf("对原始字符串进行反向输出：%s\n", reversedString)
 }
