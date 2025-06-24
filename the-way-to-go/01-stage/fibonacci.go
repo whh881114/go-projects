@@ -5,10 +5,11 @@ import "fmt"
 func main() {
 	n := 30
 	fibNums := fibList(n)
-	for _, val := range fibNums { //  0, 1, 1, 2, 3, 5, 8, 13, 21, 34, ...
-		fmt.Printf("%d ", val)
+	for _, val := range fibNums {
+		fmt.Printf("%d, ", val)
 	}
-	fmt.Println()
+	fmt.Printf("...")
+	fmt.Println() //  0, 1, 1, 2, 3, 5, 8, 13, 21, 34, ...
 }
 
 func fibList(n int) []int {
