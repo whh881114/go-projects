@@ -4,6 +4,7 @@ import (
 	"bufio"
 	"fmt"
 	"os"
+	"sort"
 	"strings"
 	"unicode"
 )
@@ -32,10 +33,18 @@ func main() {
 		}
 	}
 
-	for k, v := range statisticsMap {
-		fmt.Println(k, v)
+	// 按母顺序顺序打印
+	var words []string
+	words = make([]string, 0)
+	for k, _ := range statisticsMap {
+		words = append(words, k)
 	}
+	sort.Strings(words)
 
+	fmt.Println("按母顺序顺序打印：")
+	for _, word := range words {
+		fmt.Printf("%s -> %d\n", word, statisticsMap[word])
+	}
 }
 
 func isAllEnglish(s string) bool {
