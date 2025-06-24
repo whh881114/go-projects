@@ -1,16 +1,27 @@
 package main
 
-import "fmt"
+import (
+	"bufio"
+	"fmt"
+	"os"
+	"strings"
+)
 
 func main() {
 	var originalString string
 	var reversedString string
 
+	// 使用fmt.Scanf()时，读取到以空格隔开的字符串时，会缓存到标准输入中。
+	// fmt.Printf("请输入一串字符，以回车结束：")
+	// _, err := fmt.Scanf("%s", &originalString)
+	// if err != nil {
+	// 	panic(err)
+	// }
+
 	fmt.Printf("请输入一串字符，以回车结束：")
-	_, err := fmt.Scanf("%s", &originalString)
-	if err != nil {
-		panic(err)
-	}
+	reader := bufio.NewReader(os.Stdin)
+	input, _ := reader.ReadString('\n')
+	originalString = strings.TrimSpace(input)
 
 	// 把字符串转成 rune 切片（每个 rune 是一个 Unicode 字符）
 	tmp := []rune(originalString)
