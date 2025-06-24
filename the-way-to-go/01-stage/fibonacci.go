@@ -3,16 +3,18 @@ package main
 import "fmt"
 
 func main() {
-	n := 10
-	fibNums := make([]int, n)
-	fibNums = fibList(n)
-	fmt.Println(fibNums) //  0, 1, 1, 2, 3, 5, 8, 13, 21, 34, ...
+	n := 30
+	fibNums := fibList(n)
+	for _, val := range fibNums { //  0, 1, 1, 2, 3, 5, 8, 13, 21, 34, ...
+		fmt.Printf("%d ", val)
+	}
+	fmt.Println()
 }
 
 func fibList(n int) []int {
 	result := make([]int, 0, n)
 	for i := 0; i < n; i++ {
-		result[i] = fib(i)
+		result = append(result, fib(i+1))
 	}
 	return result
 }
