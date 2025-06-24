@@ -2,12 +2,11 @@ package main
 
 import "fmt"
 
-var originalString string
-var reversedString string
-
 func main() {
-	fmt.Printf("请输入一串字符，以回车结束：")
+	var originalString string
+	var reversedString string
 
+	fmt.Printf("请输入一串字符，以回车结束：")
 	_, err := fmt.Scanf("%s", &originalString)
 	if err != nil {
 		panic(err)
