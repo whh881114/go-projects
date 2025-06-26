@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"regexp"
+	"strconv"
 	"strings"
 )
 
@@ -25,6 +26,21 @@ func main() {
 	if !validate(data) {
 		panic("输入内容不合法，必须要求全是数字。")
 	}
+
+	tmp := strings.Split(data, "")
+	for _, i := range tmp {
+		num, err := strconv.Atoi(i)
+		if err != nil {
+			panic("字符转换数字失败。")
+		}
+		if num%2 == 0 {
+			evenSlice = append(evenSlice, num)
+		} else {
+			oddSlice = append(oddSlice, num)
+		}
+	}
+	fmt.Printf("偶数：%v\n", evenSlice)
+	fmt.Printf("奇数：%v\n", oddSlice)
 
 }
 
