@@ -7,7 +7,7 @@ import (
 )
 
 type CityTemperature struct {
-	City         any       `json:"city"`
+	City         string    `json:"city"`
 	Temperatures []float64 `json:"temperatures"`
 }
 
