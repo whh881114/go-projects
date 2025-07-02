@@ -1,1 +1,1 @@
-程序出错了，请检查输入。
+捕获 panic：open fake_file.json: The system cannot find the file specified.
