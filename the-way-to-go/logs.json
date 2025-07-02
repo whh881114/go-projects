@@ -2,5 +2,9 @@
   {"timestamp": "2024-06-01T12:00:00Z", "severity": "INFO", "message": "Service started"},
   {"timestamp": "2024-06-01T12:01:00Z", "severity": "WARN", "message": "Disk usage high"},
   {"timestamp": "2024-06-01T12:02:00Z", "severity": "ERROR", "message": "Out of memory"},
-  {"timestamp": "2024-06-01T12:03:00Z", "severity": "INFO", "message": "Health check passed"}
+  {"timestamp": "2024-06-01T12:03:00Z", "severity": "INFO", "message": "Health check passed"},
+  {"timestamp": "2024-06-01T12:04:00Z", "severity": "ERROR", "message": "Connection timeout"},
+  {"timestamp": "2024-06-01T12:05:00Z", "severity": "DEBUG", "message": "Memory allocation details"},
+  {"timestamp": "2024-06-01T12:06:00Z", "severity": "ERROR", "message": "Permission denied"},
+  {"timestamp": "2024-06-01T12:07:00Z", "severity": "WARN", "message": "CPU usage high"}
 ]
