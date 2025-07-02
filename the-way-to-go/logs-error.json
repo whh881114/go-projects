@@ -1,0 +1,17 @@
+[
+ {
+  "timestamp": "2024-06-01T12:02:00Z",
+  "severity": "ERROR",
+  "message": "Out of memory"
+ },
+ {
+  "timestamp": "2024-06-01T12:04:00Z",
+  "severity": "ERROR",
+  "message": "Connection timeout"
+ },
+ {
+  "timestamp": "2024-06-01T12:06:00Z",
+  "severity": "ERROR",
+  "message": "Permission denied"
+ }
+]
