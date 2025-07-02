@@ -1,0 +1,6 @@
+[
+  {"timestamp": "2024-06-01T12:00:00Z", "severity": "INFO", "message": "Service started"},
+  {"timestamp": "2024-06-01T12:01:00Z", "severity": "WARN", "message": "Disk usage high"},
+  {"timestamp": "2024-06-01T12:02:00Z", "severity": "ERROR", "message": "Out of memory"},
+  {"timestamp": "2024-06-01T12:03:00Z", "severity": "INFO", "message": "Health check passed"}
+]
