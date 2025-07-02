@@ -40,11 +40,11 @@ func main() {
 		return
 	}
 
-	err = os.WriteFile("logs-error.json", output, 0644)
+	err = os.WriteFile("logs_error.json", output, 0644)
 	if err != nil {
-		fmt.Println("写入 logs-error.json 失败：", err)
+		fmt.Println("写入 logs_error.json 失败：", err)
 		return
 	}
 
-	fmt.Println("写入 logs-error.json 成功。")
+	fmt.Println("写入 logs_error.json 成功。")
 }
