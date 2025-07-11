@@ -88,22 +88,6 @@ func main() {
 	logrus.Info("所有归档文件处理完毕。")
 }
 
-func loadConfig(path string) (*Config, error) {
-	file, err := os.Open(path)
-	if err != nil {
-		return nil, err
-	}
-	defer file.Close()
-
-	decoder := yaml.NewDecoder(file)
-	var cfg Config
-	if err := decoder.Decode(&cfg); err != nil {
-		return nil, err
-	}
-
-	return &cfg, nil
-}
-
 func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, out chan<- string) {
 	opt := &cos.BucketGetOptions{
 		Prefix:  prefix,
@@ -139,7 +123,9 @@ func restoreObject(client *cos.Client, key string, days, workerID int, dryRun bo
 
 	opt := &cos.ObjectRestoreOptions{
 		Days: days,
-		Tier: "Standard",
+		CASJobParameters: &cos.CASJobParameters{
+			Tier: "Standard",
+		},
 	}
 
 	_, err := client.Object.PostRestore(context.Background(), key, opt)
@@ -148,4 +134,20 @@ func restoreObject(client *cos.Client, key string, days, workerID int, dryRun bo
 	} else {
 		logrus.Infof("[Worker %d] 恢复成功: %s", workerID, key)
 	}
+}
+
+func loadConfig(path string) (*Config, error) {
+	file, err := os.Open(path)
+	if err != nil {
+		return nil, err
+	}
+	defer file.Close()
+
+	decoder := yaml.NewDecoder(file)
+	var cfg Config
+	if err := decoder.Decode(&cfg); err != nil {
+		return nil, err
+	}
+
+	return &cfg, nil
 }
