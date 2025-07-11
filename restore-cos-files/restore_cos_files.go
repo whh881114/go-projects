@@ -123,7 +123,7 @@ func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, ou
 			}
 		}
 
-		if res.IsTruncated != nil && *res.IsTruncated {
+		if res.IsTruncated {
 			opt.Marker = res.NextMarker
 		} else {
 			break
@@ -137,14 +137,12 @@ func restoreObject(client *cos.Client, key string, days, workerID int, dryRun bo
 		return
 	}
 
-	opt := &cos.RestoreObjectOptions{
+	opt := &cos.ObjectRestoreOptions{
 		Days: days,
-		CASJobParameters: &cos.CASJobParameters{
-			Tier: "Standard",
-		},
+		Tier: "Standard",
 	}
 
-	_, err := client.Object.Restore(context.Background(), key, opt)
+	_, err := client.Object.PostRestore(context.Background(), key, opt)
 	if err != nil {
 		logrus.Errorf("[Worker %d] 恢复失败: %s, 错误: %v", workerID, key, err)
 	} else {
