@@ -16,15 +16,14 @@ import (
 )
 
 type Config struct {
-	SecretID     string   `yaml:"secretId"`
-	SecretKey    string   `yaml:"secretKey"`
-	SessionToken string   `yaml:"sessionToken"`
-	Region       string   `yaml:"region"`
-	BucketName   string   `yaml:"bucketName"`
-	Prefix       []string `yaml:"prefix"`
-	MaxKeys      int      `yaml:"maxKeys"`
-	RestoreDays  int      `yaml:"restoreDays"`
-	Workers      int      `yaml:"workers"`
+	SecretID    string   `yaml:"secretId"`
+	SecretKey   string   `yaml:"secretKey"`
+	Region      string   `yaml:"region"`
+	BucketName  string   `yaml:"bucketName"`
+	Prefix      []string `yaml:"prefix"`
+	MaxKeys     int      `yaml:"maxKeys"`
+	RestoreDays int      `yaml:"restoreDays"`
+	Workers     int      `yaml:"workers"`
 }
 
 func main() {
@@ -56,9 +55,8 @@ func main() {
 	b := &cos.BaseURL{BucketURL: u}
 	client := cos.NewClient(b, &http.Client{
 		Transport: &cos.AuthorizationTransport{
-			SecretID:     cfg.SecretID,
-			SecretKey:    cfg.SecretKey,
-			SessionToken: cfg.SessionToken,
+			SecretID:  cfg.SecretID,
+			SecretKey: cfg.SecretKey,
 		},
 	})
 
