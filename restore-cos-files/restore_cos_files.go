@@ -139,7 +139,9 @@ func restoreObject(client *cos.Client, key string, days, workerID int, dryRun bo
 
 	opt := &cos.ObjectRestoreOptions{
 		Days: days,
-		Tier: "Standard", // 选择恢复类型
+		Tier: &cos.CASJobParameters{
+			Tier: "Standard", // 选择恢复类型
+		},
 	}
 
 	_, err := client.Object.PostRestore(context.Background(), key, opt)
