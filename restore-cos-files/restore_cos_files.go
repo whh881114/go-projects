@@ -66,41 +66,51 @@ func main() {
 		logrus.Info("执行恢复操作，恢复到 Standard 状态")
 	}
 
+	// 创建 COS 客户端
 	u, _ := url.Parse(fmt.Sprintf("https://%s.cos.%s.myqcloud.com", cfg.BucketName, cfg.Region))
 	b := &cos.BaseURL{BucketURL: u}
+
+	// 创建一个新的 HTTP 客户端，并设置 AuthorizationTransport
 	client := cos.NewClient(b, &http.Client{
 		Transport: &cos.AuthorizationTransport{
-			SecretID:  cfg.SecretID,
-			SecretKey: cfg.SecretKey,
+			SecretID:  cfg.SecretID,  // 从配置文件读取 SecretID
+			SecretKey: cfg.SecretKey, // 从配置文件读取 SecretKey
 		},
 	})
 
+	// 创建一个字符串通道，用于在生产者和消费者之间传递文件名
 	fileChan := make(chan string, 1000)
-	var wg sync.WaitGroup
+	var wg sync.WaitGroup // 使用 sync.WaitGroup 来等待所有 goroutine 完成
 
-	// 生产者
+	// 生产者 goroutine：负责扫描并将文件对象推送到通道
 	wg.Add(1)
 	go func() {
-		defer wg.Done()
+		defer wg.Done() // 确保在 goroutine 完成时调用 Done()
+		// 遍历配置文件中指定的 prefix，扫描并发送对象
 		for _, prefix := range cfg.Prefix {
 			scanAndSendObjects(client, cfg, prefix, date, fileChan)
 		}
-		close(fileChan)
+		close(fileChan) // 扫描完成后关闭通道，通知消费者无更多数据
 	}()
 
-	// 消费者
-	for i := 0; i < cfg.Workers; i++ {
+	// 消费者 goroutine：从通道中接收文件并执行恢复操作
+	for i := 0; i < cfg.Workers; i++ { // 根据配置的工作线程数启动多个消费者
 		wg.Add(1)
 		go func(id int) {
-			defer wg.Done()
+			defer wg.Done() // 确保在 goroutine 完成时调用 Done()
+			// 从通道中接收文件对象并恢复
 			for key := range fileChan {
 				restoreObject(client, key, cfg.RestoreDays, id, *dryRun)
 			}
-		}(i)
+		}(i) // 启动消费者 goroutine，传递 id 作为标识
 	}
 
+	// 等待所有 goroutine 完成
 	wg.Wait()
+
+	// 打印日志，表示所有归档文件已处理完毕
 	logrus.Info("所有归档文件处理完毕。")
+
 }
 
 func printUsage() {
