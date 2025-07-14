@@ -9,6 +9,7 @@ import (
 	"os"
 	"strings"
 	"sync"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/tencentyun/cos-go-sdk-v5"
@@ -142,7 +143,7 @@ func loadConfig(path string) (*Config, error) {
 func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, out chan<- string) {
 	opt := &cos.BucketGetOptions{
 		Prefix:    prefix,      // prefix 表示要查询的文件夹，其值中必须要带有'/'，例如"folder/"。
-		Delimiter: "/",         // deliter 表示分隔符, 设置为/表示列出当前目录下的 object, 设置为空表示列出所有的 object
+		Delimiter: "/",         // delimiter 表示分隔符, 设置为/表示列出当前目录下的 object, 设置为空表示列出所有的 object
 		MaxKeys:   cfg.MaxKeys, // 设置最大遍历出多少个对象, 一次 listobject 最大支持1000
 	}
 
@@ -157,8 +158,21 @@ func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, ou
 		}
 
 		for _, content := range v.Contents {
-			logrus.Infof("当前文件名：%s，其存储类型为：%s。", content.Key, content.StorageClass)
-			if strings.Contains(content.Key, date+"T") && content.StorageClass == "DEEP_ARCHIVE" {
+			logrus.Infof("当前文件名：%s，其存储类型为：%s，最后修改时间为：%s。", content.Key, content.StorageClass, content.LastModified)
+
+			// 解析 LastModified 字段为时间类型
+			modifiedTime, err := time.Parse(time.RFC3339, content.LastModified)
+			if err != nil {
+				logrus.Errorf("解析日期失败: %v", err)
+				continue
+			}
+
+			// 提取日期部分并进行匹配
+			fileDate := modifiedTime.Format("2006-01-02") // 格式化为 YYYY-MM-DD
+
+			// 判断文件的 LastModified 是否包含指定的日期，并且存储类型为 DEEP_ARCHIVE
+			if strings.Contains(fileDate, date) && content.StorageClass == "DEEP_ARCHIVE" {
+				logrus.Infof("符合条件的文件: %s", content.Key)
 				out <- content.Key
 			}
 		}
