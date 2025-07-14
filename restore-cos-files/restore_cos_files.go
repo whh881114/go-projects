@@ -141,28 +141,34 @@ func loadConfig(path string) (*Config, error) {
 
 func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, out chan<- string) {
 	opt := &cos.BucketGetOptions{
-		Prefix:  prefix,
-		MaxKeys: cfg.MaxKeys,
+		Prefix:    prefix,      // prefix 表示要查询的文件夹，其值中必须要带有'/'，例如"folder/"。
+		Delimiter: "/",         // deliter 表示分隔符, 设置为/表示列出当前目录下的 object, 设置为空表示列出所有的 object
+		MaxKeys:   cfg.MaxKeys, // 设置最大遍历出多少个对象, 一次 listobject 最大支持1000
 	}
 
-	for {
-		res, _, err := client.Bucket.Get(context.Background(), opt)
+	var marker string
+	isTruncated := true
+	for isTruncated {
+		opt.Marker = marker
+		v, _, err := client.Bucket.Get(context.Background(), opt)
 		if err != nil {
 			logrus.Errorf("列举对象失败 (%s): %v", prefix, err)
-			return
+			break
 		}
 
-		for _, obj := range res.Contents {
-			if strings.Contains(obj.Key, date+"T") && obj.StorageClass == "DEEP_ARCHIVE" {
-				out <- obj.Key
+		for _, content := range v.Contents {
+			if strings.Contains(content.Key, date+"T") && content.StorageClass == "DEEP_ARCHIVE" {
+				out <- content.Key
 			}
 		}
 
-		if res.IsTruncated {
-			opt.Marker = res.NextMarker
-		} else {
-			break
+		for _, commonPrefix := range v.CommonPrefixes {
+			fmt.Printf("CommonPrefix: %v\n", commonPrefix.Prefix)
+			scanAndSendObjects(client, cfg, commonPrefix.Prefix, date, out)
 		}
+
+		isTruncated = v.IsTruncated
+		marker = v.NextMarker
 	}
 }
 
