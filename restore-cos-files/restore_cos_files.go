@@ -157,8 +157,8 @@ func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, ou
 		}
 
 		for _, content := range v.Contents {
+			logrus.Infof("当前文件名：%s，其存储类型为：%s。", content.Key, content.StorageClass)
 			if strings.Contains(content.Key, date+"T") && content.StorageClass == "DEEP_ARCHIVE" {
-				logrus.Infof("当前文件名：%s，其存储类型为：%s。", content.Key, content.StorageClass)
 				out <- content.Key
 			}
 		}
