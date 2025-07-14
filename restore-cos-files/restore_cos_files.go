@@ -32,20 +32,28 @@ func main() {
 	debug := flag.Bool("debug", false, "是否打印调试日志，默认为 false。")
 	dryRun := flag.Bool("dry-run", true, "仅打印将执行的操作，不执行恢复，默认为 true。")
 	configPath := flag.String("config", ".cos-config.yaml", "指定配置文件路径，默认为 .cos-config.yaml。")
-	date := flag.String("date", "", "指定日期，格式为 YYYY-MM-DD。此参数是必需的。")
+	dateStr := flag.String("date", "", "指定日期，多个用英文逗号分隔，例如 2025-07-01,2025-07-02。")
 
 	// 解析命令行参数
 	flag.Parse()
 
-	// 参数验证，确保有日期，并且无多余无关参数
-	if *date == "" {
-		fmt.Println("错误: 必须指定 --date 参数，格式为 YYYY-MM-DD。")
+	// 解析date参数
+	dateList := strings.Split(*dateStr, ",")
+	dateMap := make(map[string]struct{})
+	for _, d := range dateList {
+		d = strings.TrimSpace(d)
+		if d != "" {
+			dateMap[d] = struct{}{}
+		}
+	}
+	if len(dateMap) == 0 {
+		fmt.Println("错误: 必须指定至少一个有效日期，格式为 YYYY-MM-DD。多个日期用英文逗号分隔")
 		printUsage()
 		os.Exit(1)
 	}
 
+	// 处理多余的噪音参数
 	if len(flag.Args()) > 0 {
-		// 处理多余的噪音参数
 		fmt.Println("警告: 存在无关参数：", flag.Args())
 		printUsage()
 		os.Exit(1)
@@ -96,7 +104,7 @@ func main() {
 		defer wg.Done() // 确保在 goroutine 完成时调用 Done()
 		// 遍历配置文件中指定的 prefix，扫描并发送对象
 		for _, prefix := range cfg.Prefix {
-			scanAndSendObjects(client, cfg, prefix, *date, fileChan)
+			scanAndSendObjects(client, cfg, prefix, dateMap, fileChan)
 		}
 		close(fileChan) // 扫描完成后关闭通道，通知消费者无更多数据
 	}()
@@ -123,13 +131,15 @@ func main() {
 
 func printUsage() {
 	fmt.Println("\n用法示例:")
-	fmt.Println("  ./restore-cos-files --date YYYY-MM-DD [--config xxxx.config] [--dry-run=false]")
+	fmt.Println("  ./restore-cos-files --date YYYY-MM-DD[,YYYY-MM-DD,...] [--config .cos-config.config] [--dry-run=false] [--debug=true]")
 	fmt.Println("\n参数说明:")
-	fmt.Println("  --date       必需。指定日期，格式为 YYYY-MM-DD。")
-	fmt.Println("  --config     可选。指定配置文件路径，默认为 .cos-config.yaml。")
-	fmt.Println("  --dry-run    可选。默认为 true，表示仅打印操作而不执行恢复。如果要恢复数据，请指定 --dry-run=false。")
-	fmt.Println("  --debug      可选。默认为 false，表示不打印debug级别日志。如果要打印其级别日志，请指定 --debug=true。")
-	fmt.Println("\n如果有无关的参数，将会显示警告并终止执行。")
+	fmt.Println("  --date       必需。支持一个或多个日期，格式为 YYYY-MM-DD，多个日期请使用英文逗号分隔，例如：2025-07-01,2025-07-02")
+	fmt.Println("  --config     可选。指定配置文件路径，默认为 .cos-config.yaml")
+	fmt.Println("  --dry-run    可选。默认为 true，表示仅打印将执行的操作，不执行恢复；若要真正执行恢复操作，请设置为 false")
+	fmt.Println("  --debug      可选。默认为 false，表示不打印调试日志；若设为 true，将输出每个对象的扫描与匹配过程（仅用于调试）")
+	fmt.Println("\n注意:")
+	fmt.Println("  1. 所有参数均为命令行选项格式，非位置参数")
+	fmt.Println("  2. 如果存在未识别的参数或缺失必需参数，程序将终止并提示帮助信息")
 }
 
 func loadConfig(path string) (*Config, error) {
@@ -148,7 +158,7 @@ func loadConfig(path string) (*Config, error) {
 	return &cfg, nil
 }
 
-func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, out chan<- string) {
+func scanAndSendObjects(client *cos.Client, cfg *Config, prefix string, dateMap map[string]struct{}, out chan<- string) {
 	opt := &cos.BucketGetOptions{
 		Prefix:    prefix,      // prefix 表示要查询的文件夹，其值中必须要带有'/'，例如"folder/"。
 		Delimiter: "/",         // delimiter 表示分隔符, 设置为/表示列出当前目录下的 object, 设置为空表示列出所有的 object
@@ -179,14 +189,14 @@ func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, ou
 			fileDate := modifiedTime.Format("2006-01-02") // 格式化为 YYYY-MM-DD
 
 			// 判断文件的 LastModified 是否包含指定的日期，并且存储类型为 DEEP_ARCHIVE
-			if strings.Contains(fileDate, date) && content.StorageClass == "DEEP_ARCHIVE" {
+			if _, ok := dateMap[fileDate]; ok && content.StorageClass == "DEEP_ARCHIVE" {
 				logrus.Debugf("符合条件的文件: %s %s %s", content.LastModified, content.StorageClass, content.Key)
 				out <- content.Key
 			}
 		}
 
 		for _, commonPrefix := range v.CommonPrefixes {
-			scanAndSendObjects(client, cfg, commonPrefix, date, out)
+			scanAndSendObjects(client, cfg, commonPrefix, dateMap, out)
 		}
 
 		isTruncated = v.IsTruncated
