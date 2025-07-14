@@ -1,0 +1,12 @@
+secretId: "腾讯云密钥对，要遵循权限最小化原则"
+secretKey: "腾讯云密钥对，要遵循权限最小化原则"
+
+region: "腾讯云区域，例如ap-guangzhou"
+bucketName: "COS桶名称"
+prefix:
+  - "fake-folder1/"   # "对象存储中本身是没有文件夹和目录的概念的，为了满足用户使用习惯，用户可通过分隔符/来模拟“文件夹”。"
+  - "fake-folder2/"
+maxKeys: 1000         # 每次查询返回的对象数，最大值为1000。
+restoreDays: 30       # 恢复成标准文件后，存活的时间是30天。
+
+workers: 8            # 为此程序运行时分配的cpu核心数量。
