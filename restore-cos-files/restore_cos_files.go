@@ -88,7 +88,7 @@ func main() {
 		defer wg.Done() // 确保在 goroutine 完成时调用 Done()
 		// 遍历配置文件中指定的 prefix，扫描并发送对象
 		for _, prefix := range cfg.Prefix {
-			scanAndSendObjects(client, cfg, prefix, date, fileChan)
+			scanAndSendObjects(client, cfg, prefix, *date, fileChan)
 		}
 		close(fileChan) // 扫描完成后关闭通道，通知消费者无更多数据
 	}()
