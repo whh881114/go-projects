@@ -28,11 +28,8 @@ type Config struct {
 }
 
 func main() {
-	logrus.SetFormatter(&logrus.TextFormatter{
-		FullTimestamp: true,
-	})
-
 	// 默认值设置
+	debug := flag.Bool("debug", false, "是否打印调试日志，默认为 false。")
 	dryRun := flag.Bool("dry-run", true, "仅打印将执行的操作，不执行恢复，默认为 true。")
 	configPath := flag.String("config", ".cos-config.yaml", "指定配置文件路径，默认为 .cos-config.yaml。")
 	date := flag.String("date", "", "指定日期，格式为 YYYY-MM-DD。此参数是必需的。")
@@ -52,6 +49,16 @@ func main() {
 		fmt.Println("警告: 存在无关参数：", flag.Args())
 		printUsage()
 		os.Exit(1)
+	}
+
+	// 配置日志格式
+	logrus.SetFormatter(&logrus.TextFormatter{
+		FullTimestamp: true,
+	})
+	if *debug {
+		logrus.SetLevel(logrus.DebugLevel)
+	} else {
+		logrus.SetLevel(logrus.InfoLevel)
 	}
 
 	// 加载配置文件
@@ -121,6 +128,7 @@ func printUsage() {
 	fmt.Println("  --date       必需。指定日期，格式为 YYYY-MM-DD。")
 	fmt.Println("  --config     可选。指定配置文件路径，默认为 .cos-config.yaml。")
 	fmt.Println("  --dry-run    可选。默认为 true，表示仅打印操作而不执行恢复。如果要恢复数据，请指定 --dry-run=false。")
+	fmt.Println("  --debug      可选。默认为 false，表示不打印debug级别日志。如果要打印其级别日志，请指定 --debug=true。")
 	fmt.Println("\n如果有无关的参数，将会显示警告并终止执行。")
 }
 
@@ -158,7 +166,7 @@ func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, ou
 		}
 
 		for _, content := range v.Contents {
-			logrus.Infof("当前文件名：%s，其存储类型为：%s，最后修改时间为：%s。", content.Key, content.StorageClass, content.LastModified)
+			logrus.Debugf("当前文件名：%s，其存储类型为：%s，最后修改时间为：%s。", content.Key, content.StorageClass, content.LastModified)
 
 			// 解析 LastModified 字段为时间类型
 			modifiedTime, err := time.Parse(time.RFC3339, content.LastModified)
@@ -172,7 +180,7 @@ func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, ou
 
 			// 判断文件的 LastModified 是否包含指定的日期，并且存储类型为 DEEP_ARCHIVE
 			if strings.Contains(fileDate, date) && content.StorageClass == "DEEP_ARCHIVE" {
-				logrus.Infof("符合条件的文件: %s", content.Key)
+				logrus.Debugf("符合条件的文件: %s %s %s", content.LastModified, content.StorageClass, content.Key)
 				out <- content.Key
 			}
 		}
