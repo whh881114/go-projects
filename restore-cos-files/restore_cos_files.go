@@ -31,24 +31,39 @@ func main() {
 		FullTimestamp: true,
 	})
 
-	dryRun := flag.Bool("dry-run", false, "仅打印将执行的操作，不执行恢复")
+	// 默认值设置
+	dryRun := flag.Bool("dry-run", true, "仅打印将执行的操作，不执行恢复，默认为 true。")
+	configPath := flag.String("config", ".cos-config.yaml", "指定配置文件路径，默认为 .cos-config.yaml。")
+	date := flag.String("date", "", "指定日期，格式为 YYYY-MM-DD。此参数是必需的。")
+
+	// 解析命令行参数
 	flag.Parse()
 
-	args := flag.Args()
-	if len(args) < 1 {
-		fmt.Println("Usage: ./restore-cos-files YYYY-MM-DD [.cos-config.yaml] [--dry-run]")
+	// 参数验证，确保有日期，并且无多余无关参数
+	if *date == "" {
+		fmt.Println("错误: 必须指定 --date 参数，格式为 YYYY-MM-DD。")
+		printUsage()
 		os.Exit(1)
 	}
 
-	date := args[0]
-	configPath := ".cos-config.yaml"
-	if len(args) >= 2 {
-		configPath = args[1]
+	if len(flag.Args()) > 0 {
+		// 处理多余的噪音参数
+		fmt.Println("警告: 存在无关参数：", flag.Args())
+		printUsage()
+		os.Exit(1)
 	}
 
-	cfg, err := loadConfig(configPath)
+	// 加载配置文件
+	cfg, err := loadConfig(*configPath)
 	if err != nil {
 		logrus.Fatalf("加载配置文件失败: %v", err)
+	}
+
+	// 输出 dry-run 状态
+	if *dryRun {
+		logrus.Info("启用 dry-run 模式，仅打印操作而不执行恢复")
+	} else {
+		logrus.Info("执行恢复操作，恢复到 Standard 状态")
 	}
 
 	u, _ := url.Parse(fmt.Sprintf("https://%s.cos.%s.myqcloud.com", cfg.BucketName, cfg.Region))
