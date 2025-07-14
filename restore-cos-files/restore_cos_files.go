@@ -103,6 +103,16 @@ func main() {
 	logrus.Info("所有归档文件处理完毕。")
 }
 
+func printUsage() {
+	fmt.Println("\n用法示例:")
+	fmt.Println("  ./restore-cos-files --date YYYY-MM-DD [--config xxxx.config] [--dry-run=false]")
+	fmt.Println("\n参数说明:")
+	fmt.Println("  --date       必需。指定日期，格式为 YYYY-MM-DD。")
+	fmt.Println("  --config     可选。指定配置文件路径，默认为 .cos-config.yaml。")
+	fmt.Println("  --dry-run    可选。默认为 true，表示仅打印操作而不执行恢复。如果要恢复数据，请指定 --dry-run=false。")
+	fmt.Println("\n如果有无关的参数，将会显示警告并终止执行。")
+}
+
 func loadConfig(path string) (*Config, error) {
 	file, err := os.Open(path)
 	if err != nil {
