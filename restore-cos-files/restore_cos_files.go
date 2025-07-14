@@ -163,8 +163,8 @@ func scanAndSendObjects(client *cos.Client, cfg *Config, prefix, date string, ou
 		}
 
 		for _, commonPrefix := range v.CommonPrefixes {
-			fmt.Printf("CommonPrefix: %v\n", commonPrefix.Prefix)
-			scanAndSendObjects(client, cfg, commonPrefix.Prefix, date, out)
+			fmt.Printf("CommonPrefix: %v\n", commonPrefix)
+			scanAndSendObjects(client, cfg, commonPrefix, date, out)
 		}
 
 		isTruncated = v.IsTruncated
