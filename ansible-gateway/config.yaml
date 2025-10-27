@@ -1,0 +1,18 @@
+server:
+  addr: ":8080"
+  read_timeout: "10s"
+  write_timeout: "0s"       # 建议 0，便于长时间流式回写
+  idle_timeout: "120s"
+redis:
+  addr: "127.0.0.1:6379"
+  db: 15
+  password: "a~xnwgamrsZ/flqxyCjr:9vyml6yfn"
+ansible:
+  playbook_root: "/data/devops-ansible-misc"
+  log_dir: "/data/log/ansible-registeration"
+  user: "root"
+exec:
+  hostname_timeout: "60s"
+  playbook_timeout: "2h"
+  overall_timeout: "0s"     # 设成 >0 可给整个流程总超时
+  env: []                   # 需要传给子进程的附加环境变量
