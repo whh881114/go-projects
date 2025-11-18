@@ -17,21 +17,34 @@ import (
 	"strings"
 	"time"
 
+	"github.com/gin-gonic/gin"
 	redis "github.com/redis/go-redis/v9"
 )
 
-type ServerCfg struct{ Addr, ReadTimeout, WriteTimeout, IdleTimeout string }
-
-type RedisCfg struct {
-	Addr, Password string
-	DB             int
+type ServerCfg struct {
+	Addr         string
+	ReadTimeout  string
+	WriteTimeout string
+	IdleTimeout  string
 }
 
-type AnsibleCfg struct{ PlaybookRoot, LogDir, User string }
+type RedisCfg struct {
+	Addr     string
+	Password string
+	DB       int
+}
+
+type AnsibleCfg struct {
+	PlaybookRoot string
+	LogDir       string
+	User         string
+}
 
 type ExecCfg struct {
-	HostnameTimeout, PlaybookTimeout, OverallTimeout string
-	Env                                              []string
+	HostnameTimeout string
+	PlaybookTimeout string
+	OverallTimeout  string
+	Env             []string
 }
 
 type Config struct {
@@ -42,40 +55,72 @@ type Config struct {
 }
 
 // --- 请求与校验 ---
+
 var (
 	idRe       = regexp.MustCompile(`^[a-zA-Z0-9]+-[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*$`)
 	hostnameRe = regexp.MustCompile(`^[a-zA-Z0-9]+-[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*-\d{3}$`)
 	ipRe       = regexp.MustCompile(`^(?:25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d)$`)
 )
 
-type InitReq struct{ ID, Hostname, IP string }
+type HostReq struct {
+	ID       string `json:"ID"`
+	Hostname string `json:"Hostname"`
+	IP       string `json:"IP"`
+}
 
 type App struct {
 	cfg Config
 	rdb *redis.Client
 }
 
+// 主程序
 func main() {
 	cfgPath := flag.String("config", "./config.yaml", "path to config file")
 	flag.Parse()
+
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
 		log.Fatalf("load config: %v", err)
 	}
 
-	rdb := redis.NewClient(&redis.Options{Addr: cfg.Redis.Addr, Password: cfg.Redis.Password, DB: cfg.Redis.DB})
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+
 	app := &App{cfg: cfg, rdb: rdb}
 
-	mux := http.NewServeMux()
-	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); _, _ = w.Write([]byte("ok")) })
-	mux.HandleFunc("/v1/host/register", app.handleRegistry)
-	mux.HandleFunc("/v1/host/unregister", app.handleUnregistry)
+	// gin 初始化
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Logger(), gin.Recovery())
 
-	server := &http.Server{Addr: cfg.Server.Addr, Handler: mux, ReadTimeout: mustDur(cfg.Server.ReadTimeout, 10*time.Second), WriteTimeout: mustDur(cfg.Server.WriteTimeout, 0), IdleTimeout: mustDur(cfg.Server.IdleTimeout, 120*time.Second)}
-	log.Printf("listening on %s", cfg.Server.Addr)
+	// 健康检查
+	r.GET("/health", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	// v1 host API
+	v1Host := r.Group("/v1/host")
+	{
+		v1Host.POST("/register", app.handleRegistry)
+		v1Host.POST("/unregister", app.handleUnregistry)
+	}
+
+	server := &http.Server{
+		Addr:         cfg.Server.Addr,
+		Handler:      r,
+		ReadTimeout:  mustDur(cfg.Server.ReadTimeout, 10*time.Second),
+		WriteTimeout: mustDur(cfg.Server.WriteTimeout, 0),
+		IdleTimeout:  mustDur(cfg.Server.IdleTimeout, 120*time.Second),
+	}
+
+	log.Printf("ansible-gateway listening on %s", cfg.Server.Addr)
 	log.Fatal(server.ListenAndServe())
 }
 
+// 配置加载
 func loadConfig(path string) (Config, error) {
 	b, err := os.ReadFile(path)
 	if err != nil {
@@ -91,10 +136,12 @@ func loadConfig(path string) (Config, error) {
 }
 
 // --- 极简 YAML 解析器（够用就好，结构固定） ---
+
 func parseNaiveYAML(b []byte) (Config, error) {
 	type section map[string]string
 	m := map[string]section{}
 	var cur string
+
 	for _, ln := range strings.Split(string(b), "\n") {
 		line := strings.TrimSpace(ln)
 		if line == "" || strings.HasPrefix(line, "#") {
@@ -116,11 +163,30 @@ func parseNaiveYAML(b []byte) (Config, error) {
 		v := strings.Trim(strings.TrimSpace(kv[1]), `"`)
 		m[cur][k] = v
 	}
+
 	var c Config
-	c.Server = ServerCfg{Addr: m["server"]["addr"], ReadTimeout: m["server"]["read_timeout"], WriteTimeout: m["server"]["write_timeout"], IdleTimeout: m["server"]["idle_timeout"]}
-	c.Redis = RedisCfg{Addr: m["redis"]["addr"], Password: m["redis"]["password"], DB: atoiDefault(m["redis"]["db"], 0)}
-	c.Ansible = AnsibleCfg{PlaybookRoot: m["ansible"]["playbook_root"], LogDir: m["ansible"]["log_dir"], User: m["ansible"]["user"]}
-	c.Exec = ExecCfg{HostnameTimeout: m["exec"]["hostname_timeout"], PlaybookTimeout: m["exec"]["playbook_timeout"], OverallTimeout: m["exec"]["overall_timeout"], Env: nil}
+	c.Server = ServerCfg{
+		Addr:         m["server"]["addr"],
+		ReadTimeout:  m["server"]["read_timeout"],
+		WriteTimeout: m["server"]["write_timeout"],
+		IdleTimeout:  m["server"]["idle_timeout"],
+	}
+	c.Redis = RedisCfg{
+		Addr:     m["redis"]["addr"],
+		Password: m["redis"]["password"],
+		DB:       atoiDefault(m["redis"]["db"], 0),
+	}
+	c.Ansible = AnsibleCfg{
+		PlaybookRoot: m["ansible"]["playbook_root"],
+		LogDir:       m["ansible"]["log_dir"],
+		User:         m["ansible"]["user"],
+	}
+	c.Exec = ExecCfg{
+		HostnameTimeout: m["exec"]["hostname_timeout"],
+		PlaybookTimeout: m["exec"]["playbook_timeout"],
+		OverallTimeout:  m["exec"]["overall_timeout"],
+		Env:             nil,
+	}
 	return c, nil
 }
 
@@ -135,6 +201,7 @@ func atoiDefault(s string, d int) int {
 	}
 	return d
 }
+
 func mustDur(s string, d time.Duration) time.Duration {
 	if s == "" || s == "0" {
 		return d
@@ -147,18 +214,21 @@ func mustDur(s string, d time.Duration) time.Duration {
 }
 
 // --- 处理器 ---
-func (a *App) handleRegistry(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+
+func (a *App) handleRegistry(c *gin.Context) {
+	// 只允许 POST（路由已经是 POST，这里再兜一层）
+	if c.Request.Method != http.MethodPost {
+		c.String(http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	var req InitReq
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		http.Error(w, "invalid json", 400)
+
+	var req HostReq
+	if err := json.NewDecoder(io.LimitReader(c.Request.Body, 1<<20)).Decode(&req); err != nil {
+		c.String(http.StatusBadRequest, "invalid json")
 		return
 	}
 	if err := validate(req); err != nil {
-		http.Error(w, err.Error(), 400)
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
@@ -167,15 +237,16 @@ func (a *App) handleRegistry(w http.ResponseWriter, r *http.Request) {
 	hostgroup := strings.Join(parts[:len(parts)-1], "-")
 
 	// 流式输出（避免一次性缓冲导致代理读超时）
+	w := c.Writer
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
 	flusher, ok := w.(http.Flusher)
 	if !ok {
-		http.Error(w, "streaming unsupported", 500)
+		c.String(http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 
-	ctx := r.Context()
+	ctx := c.Request.Context()
 	if ov := a.cfg.Exec.OverallTimeout; ov != "" && ov != "0s" {
 		d, _ := time.ParseDuration(ov)
 		if d > 0 {
@@ -194,15 +265,20 @@ func (a *App) handleRegistry(w http.ResponseWriter, r *http.Request) {
 	lockKey := "LOCK__" + req.Hostname
 	val := req.ID + "__" + req.IP
 	logf("[INFO] trying to register: %s", lockKey)
+
 	okSet, err := a.rdb.HSetNX(ctx, lockKey, "id__ip", val).Result()
 	if err != nil {
-		http.Error(w, "redis error: "+err.Error(), 500)
+		http.Error(w, "redis error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	if !okSet {
 		stored, _ := a.rdb.HGet(ctx, lockKey, "id__ip").Result()
 		if stored != val {
-			http.Error(w, fmt.Sprintf("[CONFLICT] already registered by %q, incoming=%q", stored, val), 409)
+			http.Error(
+				w,
+				fmt.Sprintf("[CONFLICT] already registered by %q, incoming=%q", stored, val),
+				http.StatusConflict,
+			)
 			return
 		}
 		logf("[WARN] already registered (idempotent)")
@@ -216,72 +292,89 @@ func (a *App) handleRegistry(w http.ResponseWriter, r *http.Request) {
 		logf("[WARN] %s", warn)
 	}
 	if err != nil {
-		http.Error(w, "playbook select error: "+err.Error(), 404)
+		http.Error(w, "playbook select error: "+err.Error(), http.StatusNotFound)
 		return
 	}
 	logf("[INFO] use playbook: %s", playbook)
 
 	// 写 inventory 文件
 	if err := os.MkdirAll(a.cfg.Ansible.LogDir, 0o755); err != nil {
-		http.Error(w, "mkdir log_dir: "+err.Error(), 500)
+		http.Error(w, "mkdir log_dir: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	invBase := fmt.Sprintf("%s__%s__%s.txt", req.ID, req.Hostname, req.IP)
 	invPath := filepath.Join(a.cfg.Ansible.LogDir, invBase)
 	if err := os.WriteFile(invPath, []byte("["+hostgroup+"]\n"+req.IP+"\n"), 0o644); err != nil {
-		http.Error(w, "write inventory: "+err.Error(), 500)
+		http.Error(w, "write inventory: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	logf("[INFO] inventory written: %s", invPath)
 
 	// 步骤 1：设置主机名（通过 ansible 模块 shell）
-	hostnameCmd := fmt.Sprintf("ansible -u %s %s -i %s -m shell -a 'hostnamectl set-hostname %s'", a.cfg.Ansible.User, req.IP, invPath, req.Hostname)
+	hostnameCmd := fmt.Sprintf(
+		"ansible -u %s %s -i %s -m shell -a 'hostnamectl set-hostname %s'",
+		a.cfg.Ansible.User, req.IP, invPath, req.Hostname,
+	)
 	if err := a.runAndStream(ctx, hostnameCmd, mustDur(a.cfg.Exec.HostnameTimeout, time.Minute), w, logf); err != nil {
-		http.Error(w, "hostname step failed: "+err.Error(), 500)
+		http.Error(w, "hostname step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 
 	// 步骤 2：执行 playbook 并 tee 到日志
-	logFile := strings.TrimSuffix(invPath, ".txt") + "__" + time.Now().Format("2006-01-02_15:04:05.000000") + ".log"
-	playbookCmd := fmt.Sprintf("cd %s && ansible-playbook %s -i %s -e hosts=%s 2>&1 | tee %s", a.cfg.Ansible.PlaybookRoot, playbook, invPath, hostgroup, logFile)
+	logFile := strings.TrimSuffix(invPath, ".txt") +
+		"__" + time.Now().Format("2006-01-02_15:04:05.000000") + ".log"
+
+	playbookCmd := fmt.Sprintf(
+		"cd %s && ansible-playbook %s -i %s -e hosts=%s 2>&1 | tee %s",
+		a.cfg.Ansible.PlaybookRoot, playbook, invPath, hostgroup, logFile,
+	)
 	if err := a.runAndStream(ctx, playbookCmd, mustDur(a.cfg.Exec.PlaybookTimeout, 2*time.Hour), w, logf); err != nil {
-		http.Error(w, "playbook step failed: "+err.Error(), 500)
+		http.Error(w, "playbook step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	logf("[INFO] initialize host done. log=%s", logFile)
 }
 
 // 解除注册：清理 Redis 键，便于后续重新注册（迁移/重装主机）
-func (a *App) handleUnregistry(w http.ResponseWriter, r *http.Request) {
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", 405)
+func (a *App) handleUnregistry(c *gin.Context) {
+	if c.Request.Method != http.MethodPost {
+		c.String(http.StatusMethodNotAllowed, "method not allowed")
 		return
 	}
-	var req InitReq
-	if err := json.NewDecoder(io.LimitReader(r.Body, 1<<20)).Decode(&req); err != nil {
-		http.Error(w, "invalid json", 400)
+
+	var req HostReq
+	if err := json.NewDecoder(io.LimitReader(c.Request.Body, 1<<20)).Decode(&req); err != nil {
+		c.String(http.StatusBadRequest, "invalid json")
 		return
 	}
 	if req.Hostname == "" {
-		http.Error(w, "missing hostname", 400)
+		c.String(http.StatusBadRequest, "missing hostname")
 		return
 	}
+
 	lockKey := "LOCK__" + req.Hostname
-	ctx := r.Context()
-	w.Header().Set("Content-Type", "application/json")
+	ctx := c.Request.Context()
+
 	if req.ID != "" || req.IP != "" {
 		incoming := strings.Trim(req.ID+"__"+req.IP, "_")
 		stored, _ := a.rdb.HGet(ctx, lockKey, "id__ip").Result()
 		if stored != incoming {
-			http.Error(w, fmt.Sprintf("mismatch: stored=%q incoming=%q", stored, incoming), 412)
+			c.String(http.StatusPreconditionFailed, "mismatch: stored=%q incoming=%q", stored, incoming)
 			return
 		}
 	}
+
 	_, _ = a.rdb.Del(ctx, lockKey).Result()
-	_ = json.NewEncoder(w).Encode(map[string]any{"ok": true, "deleted": lockKey})
+	c.JSON(http.StatusOK, map[string]any{
+		"ok":      true,
+		"deleted": lockKey,
+	})
 }
 
-func validate(req InitReq) error {
+// --- 业务辅助函数 ---
+
+func validate(req HostReq) error {
 	if req.ID == "" || req.Hostname == "" || req.IP == "" {
 		return errors.New("missing id/hostname/ip")
 	}
@@ -300,8 +393,10 @@ func validate(req InitReq) error {
 func selectPlaybook(root, hostgroup string) (playbook, warn string, err error) {
 	def := filepath.Join(root, "default.yml")
 	hg := filepath.Join(root, hostgroup+".yml")
+
 	defExists := fileExists(def)
 	hgExists := fileExists(hg)
+
 	switch {
 	case defExists && !hgExists:
 		return def, fmt.Sprintf("hostgroup playbook missing: %s; fallback to default", hg), nil
@@ -314,10 +409,20 @@ func selectPlaybook(root, hostgroup string) (playbook, warn string, err error) {
 	}
 }
 
-func fileExists(p string) bool { st, err := os.Stat(p); return err == nil && !st.IsDir() }
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
 
-func (a *App) runAndStream(ctx context.Context, shellCmd string, timeout time.Duration, w http.ResponseWriter, logf func(string, ...any)) error {
+func (a *App) runAndStream(
+	ctx context.Context,
+	shellCmd string,
+	timeout time.Duration,
+	w http.ResponseWriter,
+	logf func(string, ...any),
+) error {
 	logf("[INFO] run: %s", shellCmd)
+
 	c := ctx
 	var cancel context.CancelFunc
 	if timeout > 0 {
@@ -326,10 +431,12 @@ func (a *App) runAndStream(ctx context.Context, shellCmd string, timeout time.Du
 	}
 
 	cmd := exec.CommandContext(c, "/bin/bash", "-lc", shellCmd)
+
 	// 传递额外环境变量
 	if len(a.cfg.Exec.Env) > 0 {
 		cmd.Env = append(os.Environ(), a.cfg.Exec.Env...)
 	}
+
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
 		return err
@@ -354,10 +461,12 @@ func (a *App) runAndStream(ctx context.Context, shellCmd string, timeout time.Du
 		}
 		return s.Err()
 	}
+
 	// 并发读取 stdout/stderr
 	done := make(chan error, 2)
 	go func() { done <- merge(stdout, "[OUT]") }()
 	go func() { done <- merge(stderr, "[ERR]") }()
+
 	for i := 0; i < 2; i++ {
 		if e := <-done; e != nil {
 			logf("[WARN] stream: %v", e)
@@ -371,5 +480,6 @@ func (a *App) runAndStream(ctx context.Context, shellCmd string, timeout time.Du
 		}
 		return err
 	}
+
 	return nil
 }
