@@ -20,33 +20,15 @@ import (
 	redis "github.com/redis/go-redis/v9"
 )
 
-// --- 配置 ---
-// 示例 config.yaml：
-// server:
-//   addr: ":8080"
-//   read_timeout: "10s"
-//   write_timeout: "0s"        # 0 = 不限制（便于大任务流式输出）
-//   idle_timeout: "120s"
-// redis:
-//   addr: "127.0.0.1:6379"
-//   db: 15
-//   password: "a~xnwgamrsZ/flqxyCjr:9vyml6yfn"
-// ansible:
-//   playbook_root: "/data/devops-ansible-misc"
-//   log_dir: "/data/log/ansible-registeration"
-//   user: "root"
-// exec:
-//   hostname_timeout: "60s"
-//   playbook_timeout: "2h"      # 初始化很久就拉长
-//   overall_timeout: "0s"       # 0 = 不设整体超时
-//   env: []                      # 追加到子进程环境变量
-
 type ServerCfg struct{ Addr, ReadTimeout, WriteTimeout, IdleTimeout string }
+
 type RedisCfg struct {
 	Addr, Password string
 	DB             int
 }
+
 type AnsibleCfg struct{ PlaybookRoot, LogDir, User string }
+
 type ExecCfg struct {
 	HostnameTimeout, PlaybookTimeout, OverallTimeout string
 	Env                                              []string
@@ -85,9 +67,9 @@ func main() {
 	app := &App{cfg: cfg, rdb: rdb}
 
 	mux := http.NewServeMux()
-	mux.HandleFunc("/healthz", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); _, _ = w.Write([]byte("ok")) })
-	mux.HandleFunc("/v1/host/registry", app.handleRegistry)
-	mux.HandleFunc("/v1/host/unregistry", app.handleUnregistry)
+	mux.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) { w.WriteHeader(200); _, _ = w.Write([]byte("ok")) })
+	mux.HandleFunc("/v1/host/register", app.handleRegistry)
+	mux.HandleFunc("/v1/host/unregister", app.handleUnregistry)
 
 	server := &http.Server{Addr: cfg.Server.Addr, Handler: mux, ReadTimeout: mustDur(cfg.Server.ReadTimeout, 10*time.Second), WriteTimeout: mustDur(cfg.Server.WriteTimeout, 0), IdleTimeout: mustDur(cfg.Server.IdleTimeout, 120*time.Second)}
 	log.Printf("listening on %s", cfg.Server.Addr)
