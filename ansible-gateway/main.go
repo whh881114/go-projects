@@ -36,23 +36,15 @@ type RedisCfg struct {
 }
 
 type AnsibleCfg struct {
-	PlaybookRoot string
-	LogDir       string
-	User         string
-}
-
-type ExecCfg struct {
-	HostnameTimeout string
-	PlaybookTimeout string
-	OverallTimeout  string
-	Env             []string
+	Playbook string
+	Log      string
+	User     string
 }
 
 type Config struct {
 	Server  ServerCfg
 	Redis   RedisCfg
 	Ansible AnsibleCfg
-	Exec    ExecCfg
 }
 
 // 请求与校验
@@ -163,6 +155,31 @@ func validate(req HostReq) error {
 		return fmt.Errorf("invalid ip: %s", req.IP)
 	}
 	return nil
+}
+
+// ansible playbook相关函数
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
+}
+
+func selectPlaybook(root, hostgroup string) (playbook, warn string, err error) {
+	def := filepath.Join(root, "default.yml")
+	hg := filepath.Join(root, hostgroup+".yml")
+
+	defExists := fileExists(def)
+	hgExists := fileExists(hg)
+
+	switch {
+	case defExists && !hgExists:
+		return def, fmt.Sprintf("hostgroup playbook missing: %s; fallback to default", hg), nil
+	case !defExists && hgExists:
+		return hg, "", nil
+	case defExists && hgExists:
+		return hg, "both default and hostgroup exist; prefer hostgroup", nil
+	default:
+		return "", "", fmt.Errorf("neither playbook exists: %s, %s", def, hg)
+	}
 }
 
 // 主机注册逻辑
@@ -318,30 +335,6 @@ func (a *App) unregisterHost(c *gin.Context) {
 }
 
 // --- 业务辅助函数 ---
-
-func selectPlaybook(root, hostgroup string) (playbook, warn string, err error) {
-	def := filepath.Join(root, "default.yml")
-	hg := filepath.Join(root, hostgroup+".yml")
-
-	defExists := fileExists(def)
-	hgExists := fileExists(hg)
-
-	switch {
-	case defExists && !hgExists:
-		return def, fmt.Sprintf("hostgroup playbook missing: %s; fallback to default", hg), nil
-	case !defExists && hgExists:
-		return hg, "", nil
-	case defExists && hgExists:
-		return hg, "both default and hostgroup exist; prefer hostgroup", nil
-	default:
-		return "", "", fmt.Errorf("neither playbook exists: %s, %s", def, hg)
-	}
-}
-
-func fileExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && !st.IsDir()
-}
 
 func (a *App) runAndStream(
 	ctx context.Context,
