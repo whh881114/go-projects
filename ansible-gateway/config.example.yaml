@@ -8,6 +8,6 @@ redis:
   db: 15
   password: "a~xnwgamrsZ/flqxyCjr:9vyml6yfn"
 ansible:
-  playbook: "/data/devops-ansible-misc"
+  dir: "/data/devops-ansible-misc"
   log: "/data/log/ansible-registration"
   user: "root"
