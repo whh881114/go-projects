@@ -19,6 +19,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	redis "github.com/redis/go-redis/v9"
+	yaml "gopkg.in/yaml.v3"
 )
 
 type ServerCfg struct {
@@ -121,78 +122,19 @@ func main() {
 
 // 配置加载
 func loadConfig(path string) (Config, error) {
+	// 1. 读文件（只负责把 bytes 读出来）
 	b, err := os.ReadFile(path)
 	if err != nil {
 		return Config{}, err
 	}
 
-	return parseNaiveYAML(b)
-}
-
-// 极简 YAML 解析器（够用就好，结构固定）
-func parseNaiveYAML(b []byte) (Config, error) {
-	type section map[string]string
-	m := map[string]section{}
-	var cur string
-
-	for _, ln := range strings.Split(string(b), "\n") {
-		line := strings.TrimSpace(ln)
-		if line == "" || strings.HasPrefix(line, "#") {
-			continue
-		}
-		if strings.HasSuffix(line, ":") && !strings.Contains(line, " ") {
-			cur = strings.TrimSuffix(line, ":")
-			m[cur] = section{}
-			continue
-		}
-		if cur == "" {
-			continue
-		}
-		kv := strings.SplitN(line, ":", 2)
-		if len(kv) != 2 {
-			continue
-		}
-		k := strings.TrimSpace(kv[0])
-		v := strings.Trim(strings.TrimSpace(kv[1]), `"`)
-		m[cur][k] = v
+	// 2. YAML 解析（负责“看得懂”缩进、冒号、列表等语法）
+	var cfg Config
+	if err := yaml.Unmarshal(b, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse config yaml: %w", err)
 	}
 
-	var c Config
-	c.Server = ServerCfg{
-		Addr:         m["server"]["addr"],
-		ReadTimeout:  m["server"]["read_timeout"],
-		WriteTimeout: m["server"]["write_timeout"],
-		IdleTimeout:  m["server"]["idle_timeout"],
-	}
-	c.Redis = RedisCfg{
-		Addr:     m["redis"]["addr"],
-		Password: m["redis"]["password"],
-		DB:       atoiDefault(m["redis"]["db"], 0),
-	}
-	c.Ansible = AnsibleCfg{
-		PlaybookRoot: m["ansible"]["playbook_root"],
-		LogDir:       m["ansible"]["log_dir"],
-		User:         m["ansible"]["user"],
-	}
-	c.Exec = ExecCfg{
-		HostnameTimeout: m["exec"]["hostname_timeout"],
-		PlaybookTimeout: m["exec"]["playbook_timeout"],
-		OverallTimeout:  m["exec"]["overall_timeout"],
-		Env:             nil,
-	}
-	return c, nil
-}
-
-func atoiDefault(s string, d int) int {
-	if s == "" {
-		return d
-	}
-	v, err := fmt.Sscanf(s, "%d", &d)
-	_ = v
-	if err != nil {
-		return d
-	}
-	return d
+	return cfg, nil
 }
 
 func mustDur(s string, d time.Duration) time.Duration {
