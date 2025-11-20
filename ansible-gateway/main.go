@@ -54,8 +54,7 @@ type Config struct {
 	Exec    ExecCfg
 }
 
-// --- 请求与校验 ---
-
+// 请求与校验
 var (
 	idRe       = regexp.MustCompile(`^[a-zA-Z0-9]+-[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*$`)
 	hostnameRe = regexp.MustCompile(`^[a-zA-Z0-9]+-[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*-\d{3}$`)
@@ -126,17 +125,11 @@ func loadConfig(path string) (Config, error) {
 	if err != nil {
 		return Config{}, err
 	}
-	// 允许 JSON 或 YAML（极简解析：优先 JSON，失败再 YAML）
-	var c Config
-	if json.Unmarshal(b, &c) == nil {
-		return c, nil
-	}
-	// 轻量 YAML 解析：支持 "k: v" 格式与简单嵌套（避免引第三方依赖，便于单文件复制）
+
 	return parseNaiveYAML(b)
 }
 
-// --- 极简 YAML 解析器（够用就好，结构固定） ---
-
+// 极简 YAML 解析器（够用就好，结构固定）
 func parseNaiveYAML(b []byte) (Config, error) {
 	type section map[string]string
 	m := map[string]section{}
