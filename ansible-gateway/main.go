@@ -163,22 +163,41 @@ func fileExists(p string) bool {
 	return err == nil && !st.IsDir()
 }
 
-func selectPlaybook(root, hostgroup string) (playbook, warn string, err error) {
-	def := filepath.Join(root, "default.yml")
-	hg := filepath.Join(root, hostgroup+".yml")
+func findPlaybookFile(root, base string) (string, error) {
+	ymlPath := filepath.Join(root, base+".yml")
+	yamlPath := filepath.Join(root, base+".yaml")
 
-	defExists := fileExists(def)
-	hgExists := fileExists(hg)
+	ymlExists := fileExists(ymlPath)
+	yamlExists := fileExists(yamlPath)
+
+	if ymlExists && yamlExists {
+		return "", fmt.Errorf("ambiguous playbook: both %s and %s exist", ymlPath, yamlPath)
+	}
+	if ymlExists {
+		return ymlPath, nil
+	}
+	if yamlExists {
+		return yamlPath, nil
+	}
+	return "", fmt.Errorf("no playbook found: %s.{yml|yaml}", base)
+}
+
+func selectPlaybook(root, hostgroup string) (playbook, warn string, err error) {
+	def, defExists := findPlaybookFile(root, "default")
+	hg, hgExists := findPlaybookFile(root, hostgroup)
 
 	switch {
 	case defExists && !hgExists:
-		return def, fmt.Sprintf("hostgroup playbook missing: %s; fallback to default", hg), nil
+		return def, fmt.Sprintf("hostgroup playbook missing: %s.{yml|yaml}; fallback to default", hostgroup), nil
+
 	case !defExists && hgExists:
 		return hg, "", nil
+
 	case defExists && hgExists:
 		return hg, "both default and hostgroup exist; prefer hostgroup", nil
+
 	default:
-		return "", "", fmt.Errorf("neither playbook exists: %s, %s", def, hg)
+		return "", "", fmt.Errorf("neither default nor hostgroup playbook exists under %s (tried .yml/.yaml)", root)
 	}
 }
 
@@ -229,15 +248,19 @@ func (a *App) registerHost(c *gin.Context) {
 	logf("[INFO] trying to register: %s", lockKey)
 
 	okSet, err := a.rdb.HSetNX(ctx, lockKey, "id__ip", val).Result()
+
 	if err != nil {
 		http.Error(w, "redis error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
+
 	if okSet {
 		logf("[INFO] registered")
 	} else {
 		stored, _ := a.rdb.HGet(ctx, lockKey, "id__ip").Result()
+		// 冲突：不同的 ID/IP 抢同一个 hostname
 		if stored != val {
+			logf("[ERROR] registration conflict: stored=%q, incoming=%q", stored, val)
 			http.Error(
 				w,
 				fmt.Sprintf("[CONFLICT] already registered by %q, incoming=%q", stored, val),
@@ -245,11 +268,12 @@ func (a *App) registerHost(c *gin.Context) {
 			)
 			return
 		}
-		logf("[ERROR] already registered (idempotent)")
+		// 幂等：相同的请求再次进来，放行
+		logf("[WARN] already registered (idempotent), stored=%q", stored)
 	}
 
 	// 选 playbook
-	playbook, warn, err := selectPlaybook(a.cfg.Ansible.PlaybookRoot, hostgroup)
+	playbook, warn, err := selectPlaybook(a.cfg.Ansible.Playbook, hostgroup)
 	if warn != "" {
 		logf("[WARN] %s", warn)
 	}
