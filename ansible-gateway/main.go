@@ -197,20 +197,14 @@ func (a *App) registerHost(c *gin.Context) {
 		return
 	}
 
-	ctx := c.Request.Context()
-	if ov := a.cfg.Exec.OverallTimeout; ov != "" && ov != "0s" {
-		d, _ := time.ParseDuration(ov)
-		if d > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, d)
-			defer cancel()
-		}
-	}
-
+	// 直接使用标准库 log，带时间戳；logf 只是包装一下做 flush
+	logger := log.New(w, "", log.LstdFlags|log.Lmicroseconds)
 	logf := func(format string, args ...any) {
-		fmt.Fprintf(w, time.Now().Format("2006-01-02_15:04:05.000000 ")+" "+format+"\n", args...)
+		logger.Printf(format, args...)
 		flusher.Flush()
 	}
+
+	ctx := c.Request.Context()
 
 	// Redis 锁
 	lockKey := "LOCK__" + req.Hostname
@@ -222,7 +216,9 @@ func (a *App) registerHost(c *gin.Context) {
 		http.Error(w, "redis error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-	if !okSet {
+	if okSet {
+		logf("[INFO] registered")
+	} else {
 		stored, _ := a.rdb.HGet(ctx, lockKey, "id__ip").Result()
 		if stored != val {
 			http.Error(
@@ -233,8 +229,6 @@ func (a *App) registerHost(c *gin.Context) {
 			return
 		}
 		logf("[WARN] already registered (idempotent)")
-	} else {
-		logf("[INFO] registered")
 	}
 
 	// 选 playbook
