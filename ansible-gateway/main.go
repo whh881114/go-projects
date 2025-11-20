@@ -129,17 +129,6 @@ func loadConfig(path string) (Config, error) {
 	return cfg, nil
 }
 
-func mustDur(s string, d time.Duration) time.Duration {
-	if s == "" || s == "0" {
-		return d
-	}
-	v, err := time.ParseDuration(s)
-	if err != nil {
-		return d
-	}
-	return v
-}
-
 // 校验请求体
 func validate(req HostReq) error {
 	if req.ID == "" || req.Hostname == "" || req.IP == "" {
@@ -284,12 +273,12 @@ func (a *App) registerHost(c *gin.Context) {
 	logf("[INFO] use playbook: %s", playbook)
 
 	// 写 inventory 文件
-	if err := os.MkdirAll(a.cfg.Ansible.LogDir, 0o755); err != nil {
+	if err := os.MkdirAll(a.cfg.Ansible.Log, 0o755); err != nil {
 		http.Error(w, "mkdir log_dir: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	invBase := fmt.Sprintf("%s__%s__%s.txt", req.ID, req.Hostname, req.IP)
-	invPath := filepath.Join(a.cfg.Ansible.LogDir, invBase)
+	invPath := filepath.Join(a.cfg.Ansible.Log, invBase)
 	if err := os.WriteFile(invPath, []byte("["+hostgroup+"]\n"+req.IP+"\n"), 0o644); err != nil {
 		http.Error(w, "write inventory: "+err.Error(), http.StatusInternalServerError)
 		return
@@ -301,7 +290,8 @@ func (a *App) registerHost(c *gin.Context) {
 		"ansible -u %s %s -i %s -m shell -a 'hostnamectl set-hostname %s'",
 		a.cfg.Ansible.User, req.IP, invPath, req.Hostname,
 	)
-	if err := a.runAndStream(ctx, hostnameCmd, mustDur(a.cfg.Exec.HostnameTimeout, time.Minute), w, logf); err != nil {
+	// timeout=0，等ansible命令执行完或执行过程中报错
+	if err := a.runAndStream(ctx, hostnameCmd, 0, w, logf); err != nil {
 		http.Error(w, "hostname step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
