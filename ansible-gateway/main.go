@@ -228,7 +228,7 @@ func (a *App) registerHost(c *gin.Context) {
 			)
 			return
 		}
-		logf("[WARN] already registered (idempotent)")
+		logf("[ERROR] already registered (idempotent)")
 	}
 
 	// 选 playbook
