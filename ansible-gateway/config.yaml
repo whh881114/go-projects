@@ -14,5 +14,4 @@ ansible:
 exec:
   hostname_timeout: "60s"
   playbook_timeout: "2h"
-  overall_timeout: "0s"     # 设成 >0 可给整个流程总超时
   env: []                   # 需要传给子进程的附加环境变量
