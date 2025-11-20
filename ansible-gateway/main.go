@@ -104,8 +104,8 @@ func main() {
 	// v1 host API
 	v1Host := r.Group("/v1/host")
 	{
-		v1Host.POST("/register", app.handleRegistry)
-		v1Host.POST("/unregister", app.handleUnregistry)
+		v1Host.POST("/register", app.registerHost)
+		v1Host.POST("/unregister", app.unregisterHost)
 	}
 
 	server := &http.Server{
@@ -148,9 +148,25 @@ func mustDur(s string, d time.Duration) time.Duration {
 	return v
 }
 
-// --- 处理器 ---
+// 校验请求体
+func validate(req HostReq) error {
+	if req.ID == "" || req.Hostname == "" || req.IP == "" {
+		return errors.New("missing id/hostname/ip")
+	}
+	if !idRe.MatchString(req.ID) {
+		return fmt.Errorf("invalid id: %s", req.ID)
+	}
+	if !hostnameRe.MatchString(req.Hostname) {
+		return fmt.Errorf("invalid hostname: %s", req.Hostname)
+	}
+	if !ipRe.MatchString(req.IP) {
+		return fmt.Errorf("invalid ip: %s", req.IP)
+	}
+	return nil
+}
 
-func (a *App) handleRegistry(c *gin.Context) {
+// 主机注册逻辑
+func (a *App) registerHost(c *gin.Context) {
 	// 只允许 POST（路由已经是 POST，这里再兜一层）
 	if c.Request.Method != http.MethodPost {
 		c.String(http.StatusMethodNotAllowed, "method not allowed")
@@ -167,7 +183,7 @@ func (a *App) handleRegistry(c *gin.Context) {
 		return
 	}
 
-	// 计算 hostgroup（去掉最后的 -NNN）
+	// 计算 hostgroup（去掉最后的 -NNN），用于ansible的hostgroup
 	parts := strings.Split(req.Hostname, "-")
 	hostgroup := strings.Join(parts[:len(parts)-1], "-")
 
@@ -272,7 +288,7 @@ func (a *App) handleRegistry(c *gin.Context) {
 }
 
 // 解除注册：清理 Redis 键，便于后续重新注册（迁移/重装主机）
-func (a *App) handleUnregistry(c *gin.Context) {
+func (a *App) unregisterHost(c *gin.Context) {
 	if c.Request.Method != http.MethodPost {
 		c.String(http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -308,22 +324,6 @@ func (a *App) handleUnregistry(c *gin.Context) {
 }
 
 // --- 业务辅助函数 ---
-
-func validate(req HostReq) error {
-	if req.ID == "" || req.Hostname == "" || req.IP == "" {
-		return errors.New("missing id/hostname/ip")
-	}
-	if !idRe.MatchString(req.ID) {
-		return fmt.Errorf("invalid id: %s", req.ID)
-	}
-	if !hostnameRe.MatchString(req.Hostname) {
-		return fmt.Errorf("invalid hostname: %s", req.Hostname)
-	}
-	if !ipRe.MatchString(req.IP) {
-		return fmt.Errorf("invalid ip: %s", req.IP)
-	}
-	return nil
-}
 
 func selectPlaybook(root, hostgroup string) (playbook, warn string, err error) {
 	def := filepath.Join(root, "default.yml")
