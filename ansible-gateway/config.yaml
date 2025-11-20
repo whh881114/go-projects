@@ -9,9 +9,5 @@ redis:
   password: "a~xnwgamrsZ/flqxyCjr:9vyml6yfn"
 ansible:
   playbook_root: "/data/devops-ansible-misc"
-  log_dir: "/data/log/ansible-registeration"
+  log_dir: "/data/log/ansible-registration"
   user: "root"
-exec:
-  hostname_timeout: "60s"
-  playbook_timeout: "2h"
-  env: []                   # 需要传给子进程的附加环境变量
