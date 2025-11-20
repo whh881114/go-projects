@@ -22,87 +22,37 @@ import (
 	yaml "gopkg.in/yaml.v3"
 )
 
-// -------------------- 配置结构 --------------------
-
 type ServerCfg struct {
-	Addr         string `yaml:"addr"`
-	ReadTimeout  string `yaml:"read_timeout"`
-	WriteTimeout string `yaml:"write_timeout"`
-	IdleTimeout  string `yaml:"idle_timeout"`
+	Addr         string
+	ReadTimeout  string
+	WriteTimeout string
+	IdleTimeout  string
 }
 
 type RedisCfg struct {
-	Addr     string `yaml:"addr"`
-	Password string `yaml:"password"`
-	DB       int    `yaml:"db"`
+	Addr     string
+	Password string
+	DB       int
 }
 
 type AnsibleCfg struct {
-	PlaybookRoot string `yaml:"playbook_root"`
-	LogDir       string `yaml:"log_dir"`
-	User         string `yaml:"user"`
-}
-
-type ExecCfg struct {
-	HostnameTimeout string   `yaml:"hostname_timeout"`
-	PlaybookTimeout string   `yaml:"playbook_timeout"`
-	OverallTimeout  string   `yaml:"overall_timeout"`
-	Env             []string `yaml:"env"`
+	Dir  string
+	Log  string
+	User string
 }
 
 type Config struct {
-	Server  ServerCfg  `yaml:"server"`
-	Redis   RedisCfg   `yaml:"redis"`
-	Ansible AnsibleCfg `yaml:"ansible"`
-	Exec    ExecCfg    `yaml:"exec"`
+	Server  ServerCfg
+	Redis   RedisCfg
+	Ansible AnsibleCfg
 }
 
-func loadConfig(path string) (Config, error) {
-	b, err := os.ReadFile(path)
-	if err != nil {
-		return Config{}, err
-	}
-
-	var cfg Config
-	if err := yaml.Unmarshal(b, &cfg); err != nil {
-		return Config{}, fmt.Errorf("parse config yaml: %w", err)
-	}
-
-	if err := cfg.Validate(); err != nil {
-		return Config{}, fmt.Errorf("invalid config: %w", err)
-	}
-
-	return cfg, nil
-}
-
-func (c *Config) Validate() error {
-	if c.Server.Addr == "" {
-		return fmt.Errorf("server.addr is required")
-	}
-	if c.Redis.Addr == "" {
-		return fmt.Errorf("redis.addr is required")
-	}
-	if c.Ansible.PlaybookRoot == "" {
-		return fmt.Errorf("ansible.playbook_root is required")
-	}
-	if c.Ansible.LogDir == "" {
-		return fmt.Errorf("ansible.log_dir is required")
-	}
-	if c.Ansible.User == "" {
-		return fmt.Errorf("ansible.user is required")
-	}
-	return nil
-}
-
-// -------------------- 校验用正则 --------------------
-
+// 请求与校验
 var (
 	idRe       = regexp.MustCompile(`^[a-zA-Z0-9]+-[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*$`)
 	hostnameRe = regexp.MustCompile(`^[a-zA-Z0-9]+-[a-zA-Z0-9]+(?:-[a-zA-Z0-9]+)*-\d{3}$`)
 	ipRe       = regexp.MustCompile(`^(?:25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d)\.(?:25[0-5]|2[0-4]\d|[0-1]\d{2}|[1-9]?\d)$`)
 )
-
-// -------------------- 请求结构 --------------------
 
 type HostReq struct {
 	ID       string `json:"ID"`
@@ -110,7 +60,88 @@ type HostReq struct {
 	IP       string `json:"IP"`
 }
 
-func validateHostReq(req HostReq) error {
+type App struct {
+	cfg Config
+	rdb *redis.Client
+}
+
+// 主程序
+func main() {
+	cfgPath := flag.String("config", "./config.yaml", "path to config file")
+	flag.Parse()
+
+	cfg, err := loadConfig(*cfgPath)
+	if err != nil {
+		log.Fatalf("load config: %v", err)
+	}
+
+	rdb := redis.NewClient(&redis.Options{
+		Addr:     cfg.Redis.Addr,
+		Password: cfg.Redis.Password,
+		DB:       cfg.Redis.DB,
+	})
+
+	app := &App{cfg: cfg, rdb: rdb}
+
+	// gin 初始化
+	gin.SetMode(gin.ReleaseMode)
+	r := gin.New()
+	r.Use(gin.Logger(), gin.Recovery())
+
+	// 健康检查
+	r.GET("/health", func(c *gin.Context) {
+		c.String(http.StatusOK, "ok")
+	})
+
+	// v1 host API
+	v1Host := r.Group("/v1/host")
+	{
+		v1Host.POST("/register", app.registerHost)
+		v1Host.POST("/unregister", app.unregisterHost)
+	}
+
+	server := &http.Server{
+		Addr:         cfg.Server.Addr,
+		Handler:      r,
+		ReadTimeout:  mustDur(cfg.Server.ReadTimeout, 10*time.Second),
+		WriteTimeout: mustDur(cfg.Server.WriteTimeout, 0),
+		IdleTimeout:  mustDur(cfg.Server.IdleTimeout, 120*time.Second),
+	}
+
+	log.Printf("ansible-gateway listening on %s", cfg.Server.Addr)
+	log.Fatal(server.ListenAndServe())
+}
+
+// 配置加载
+func loadConfig(path string) (Config, error) {
+	// 1. 读文件（只负责把 bytes 读出来）
+	b, err := os.ReadFile(path)
+	if err != nil {
+		return Config{}, err
+	}
+
+	// 2. YAML 解析（负责“看得懂”缩进、冒号、列表等语法）
+	var cfg Config
+	if err := yaml.Unmarshal(b, &cfg); err != nil {
+		return Config{}, fmt.Errorf("parse config yaml: %w", err)
+	}
+
+	return cfg, nil
+}
+
+func mustDur(s string, d time.Duration) time.Duration {
+	if s == "" || s == "0" {
+		return d
+	}
+	v, err := time.ParseDuration(s)
+	if err != nil {
+		return d
+	}
+	return v
+}
+
+// 校验请求体
+func validate(req HostReq) error {
 	if req.ID == "" || req.Hostname == "" || req.IP == "" {
 		return errors.New("missing id/hostname/ip")
 	}
@@ -126,77 +157,53 @@ func validateHostReq(req HostReq) error {
 	return nil
 }
 
-// -------------------- App --------------------
-
-type App struct {
-	cfg Config
-	rdb *redis.Client
+// ansible playbook相关函数
+func fileExists(p string) bool {
+	st, err := os.Stat(p)
+	return err == nil && !st.IsDir()
 }
 
-func mustDur(s string, def time.Duration) time.Duration {
-	if s == "" {
-		return def
+func findPlaybookFile(dir, base string) (string, bool, error) {
+	ymlPath := filepath.Join(dir, base+".yml")
+	yamlPath := filepath.Join(dir, base+".yaml")
+
+	ymlExists := fileExists(ymlPath)
+	yamlExists := fileExists(yamlPath)
+
+	if ymlExists && yamlExists {
+		return "", false, fmt.Errorf("ambiguous playbook: both %s and %s exist", ymlPath, yamlPath)
 	}
-	if s == "0" || s == "0s" {
-		return 0
+	if ymlExists {
+		return ymlPath, true, nil
 	}
-	d, err := time.ParseDuration(s)
-	if err != nil {
-		return def
+	if yamlExists {
+		return yamlPath, true, nil
 	}
-	return d
+	return "", false, fmt.Errorf("no playbook found: %s.{yml|yaml}", base)
 }
 
-// -------------------- 入口 main --------------------
+func selectPlaybook(dir, hostgroup string) (playbook, warn string, err error) {
+	def, defExists, _ := findPlaybookFile(dir, "default")
+	hg, hgExists, _ := findPlaybookFile(dir, hostgroup)
 
-func main() {
-	cfgPath := flag.String("config", "./config.yaml", "path to config file")
-	flag.Parse()
+	switch {
+	case defExists && !hgExists:
+		return def, fmt.Sprintf("hostgroup playbook missing: %s.{yml|yaml}; fallback to default", hostgroup), nil
 
-	cfg, err := loadConfig(*cfgPath)
-	if err != nil {
-		log.Fatalf("load config failed: %v", err)
+	case !defExists && hgExists:
+		return hg, "", nil
+
+	case defExists && hgExists:
+		return hg, "both default and hostgroup exist; prefer hostgroup", nil
+
+	default:
+		return "", "", fmt.Errorf("neither default nor hostgroup playbook exists under %s (tried .yml/.yaml)", root)
 	}
-
-	rdb := redis.NewClient(&redis.Options{
-		Addr:     cfg.Redis.Addr,
-		Password: cfg.Redis.Password,
-		DB:       cfg.Redis.DB,
-	})
-
-	app := &App{cfg: cfg, rdb: rdb}
-
-	gin.SetMode(gin.ReleaseMode)
-	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
-
-	// 健康检查
-	r.GET("/healthz", func(c *gin.Context) {
-		c.String(http.StatusOK, "ok")
-	})
-
-	// v1 host API
-	v1Host := r.Group("/v1/host")
-	{
-		v1Host.POST("/registry", app.handleRegistry)
-		v1Host.POST("/unregistry", app.handleUnregistry)
-	}
-
-	server := &http.Server{
-		Addr:         cfg.Server.Addr,
-		Handler:      r,
-		ReadTimeout:  mustDur(cfg.Server.ReadTimeout, 10*time.Second),
-		WriteTimeout: mustDur(cfg.Server.WriteTimeout, 0),
-		IdleTimeout:  mustDur(cfg.Server.IdleTimeout, 120*time.Second),
-	}
-
-	log.Printf("ansible-gateway listening on %s", cfg.Server.Addr)
-	log.Fatal(server.ListenAndServe())
 }
 
-// -------------------- 处理器：注册 --------------------
-
-func (a *App) handleRegistry(c *gin.Context) {
+// 主机注册逻辑
+func (a *App) registerHost(c *gin.Context) {
+	// 只允许 POST（路由已经是 POST，这里再兜一层）
 	if c.Request.Method != http.MethodPost {
 		c.String(http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -207,49 +214,42 @@ func (a *App) handleRegistry(c *gin.Context) {
 		c.String(http.StatusBadRequest, "invalid json")
 		return
 	}
-	if err := validateHostReq(req); err != nil {
+	if err := validate(req); err != nil {
 		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
-	// hostgroup = hostname 去掉最后一段 -NNN
+	// 计算 hostgroup（去掉最后的 -NNN），用于ansible的hostgroup
 	parts := strings.Split(req.Hostname, "-")
 	hostgroup := strings.Join(parts[:len(parts)-1], "-")
 
+	// 流式输出（避免一次性缓冲导致代理读超时）
 	w := c.Writer
 	w.Header().Set("Content-Type", "text/plain; charset=utf-8")
 	w.Header().Set("X-Content-Type-Options", "nosniff")
-
 	flusher, ok := w.(http.Flusher)
 	if !ok {
 		c.String(http.StatusInternalServerError, "streaming unsupported")
 		return
 	}
 
-	// OverallTimeout 包一层
-	ctx := c.Request.Context()
-	if ov := a.cfg.Exec.OverallTimeout; ov != "" && ov != "0s" && ov != "0" {
-		if d, err := time.ParseDuration(ov); err == nil && d > 0 {
-			var cancel context.CancelFunc
-			ctx, cancel = context.WithTimeout(ctx, d)
-			defer cancel()
-		}
-	}
-
+	// 直接使用标准库 log，带时间戳；logf 只是包装一下做 flush
+	logger := log.New(w, "", log.LstdFlags|log.Lmicroseconds)
 	logf := func(format string, args ...any) {
-		t := time.Now().Format("2006-01-02_15:04:05.000000")
-		fmt.Fprintf(w, "%s %s\n", t, fmt.Sprintf(format, args...))
+		logger.Printf(format, args...)
 		flusher.Flush()
 	}
+
+	ctx := c.Request.Context()
 
 	// Redis 锁
 	lockKey := "LOCK__" + req.Hostname
 	val := req.ID + "__" + req.IP
-
 	logf("[INFO] trying to register: %s", lockKey)
+
 	okSet, err := a.rdb.HSetNX(ctx, lockKey, "id__ip", val).Result()
+
 	if err != nil {
-		logf("[ERROR] redis HSetNX failed: %v", err)
 		http.Error(w, "redis error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -258,10 +258,9 @@ func (a *App) handleRegistry(c *gin.Context) {
 		logf("[INFO] registered")
 	} else {
 		stored, _ := a.rdb.HGet(ctx, lockKey, "id__ip").Result()
-		if stored == val {
-			logf("[WARN] already registered (idempotent), stored=%q", stored)
-		} else {
-			logf("[ERROR] registration conflict: stored=%q incoming=%q", stored, val)
+		// 冲突：不同的 ID/IP 抢同一个 hostname
+		if stored != val {
+			logf("[ERROR] registration conflict: stored=%q, incoming=%q", stored, val)
 			http.Error(
 				w,
 				fmt.Sprintf("[CONFLICT] already registered by %q, incoming=%q", stored, val),
@@ -269,53 +268,40 @@ func (a *App) handleRegistry(c *gin.Context) {
 			)
 			return
 		}
+		// 幂等：相同的请求再次进来，放行
+		logf("[WARN] already registered (idempotent), stored=%q", stored)
 	}
 
-	// 选择 playbook
-	playbook, warn, selErr := selectPlaybook(a.cfg.Ansible.PlaybookRoot, hostgroup)
+	// 选 playbook
+	playbook, warn, err := selectPlaybook(a.cfg.Ansible.Dir, hostgroup)
 	if warn != "" {
 		logf("[WARN] %s", warn)
 	}
-	if selErr != nil {
-		logf("[ERROR] %v", selErr)
-		http.Error(w, "playbook select error: "+selErr.Error(), http.StatusNotFound)
+	if err != nil {
+		http.Error(w, "playbook select error: "+err.Error(), http.StatusNotFound)
 		return
 	}
 	logf("[INFO] use playbook: %s", playbook)
 
-	// 准备日志目录
+	// 写 inventory 文件
 	if err := os.MkdirAll(a.cfg.Ansible.LogDir, 0o755); err != nil {
-		logf("[ERROR] mkdir log_dir failed: %v", err)
 		http.Error(w, "mkdir log_dir: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
-
-	// 写 inventory 文件
 	invBase := fmt.Sprintf("%s__%s__%s.txt", req.ID, req.Hostname, req.IP)
 	invPath := filepath.Join(a.cfg.Ansible.LogDir, invBase)
-	content := "[" + hostgroup + "]\n" + req.IP + "\n"
-
-	if err := os.WriteFile(invPath, []byte(content), 0o644); err != nil {
-		logf("[ERROR] write inventory failed: %v", err)
+	if err := os.WriteFile(invPath, []byte("["+hostgroup+"]\n"+req.IP+"\n"), 0o644); err != nil {
 		http.Error(w, "write inventory: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	logf("[INFO] inventory written: %s", invPath)
 
-	// 步骤 1：设置主机名
+	// 步骤 1：设置主机名（通过 ansible 模块 shell）
 	hostnameCmd := fmt.Sprintf(
 		"ansible -u %s %s -i %s -m shell -a 'hostnamectl set-hostname %s'",
 		a.cfg.Ansible.User, req.IP, invPath, req.Hostname,
 	)
-
-	if err := a.runAndStream(
-		ctx,
-		hostnameCmd,
-		mustDur(a.cfg.Exec.HostnameTimeout, time.Minute),
-		w,
-		logf,
-	); err != nil {
-		logf("[ERROR] hostname step failed: %v", err)
+	if err := a.runAndStream(ctx, hostnameCmd, mustDur(a.cfg.Exec.HostnameTimeout, time.Minute), w, logf); err != nil {
 		http.Error(w, "hostname step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -328,15 +314,7 @@ func (a *App) handleRegistry(c *gin.Context) {
 		"cd %s && ansible-playbook %s -i %s -e hosts=%s 2>&1 | tee %s",
 		a.cfg.Ansible.PlaybookRoot, playbook, invPath, hostgroup, logFile,
 	)
-
-	if err := a.runAndStream(
-		ctx,
-		playbookCmd,
-		mustDur(a.cfg.Exec.PlaybookTimeout, 2*time.Hour),
-		w,
-		logf,
-	); err != nil {
-		logf("[ERROR] playbook step failed: %v", err)
+	if err := a.runAndStream(ctx, playbookCmd, mustDur(a.cfg.Exec.PlaybookTimeout, 2*time.Hour), w, logf); err != nil {
 		http.Error(w, "playbook step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -344,9 +322,8 @@ func (a *App) handleRegistry(c *gin.Context) {
 	logf("[INFO] initialize host done. log=%s", logFile)
 }
 
-// -------------------- 处理器：解除注册 --------------------
-
-func (a *App) handleUnregistry(c *gin.Context) {
+// 解除注册：清理 Redis 键，便于后续重新注册（迁移/重装主机）
+func (a *App) unregisterHost(c *gin.Context) {
 	if c.Request.Method != http.MethodPost {
 		c.String(http.StatusMethodNotAllowed, "method not allowed")
 		return
@@ -365,7 +342,6 @@ func (a *App) handleUnregistry(c *gin.Context) {
 	lockKey := "LOCK__" + req.Hostname
 	ctx := c.Request.Context()
 
-	// 如果提供了 ID/IP，就做守卫匹配
 	if req.ID != "" || req.IP != "" {
 		incoming := strings.Trim(req.ID+"__"+req.IP, "_")
 		stored, _ := a.rdb.HGet(ctx, lockKey, "id__ip").Result()
@@ -382,57 +358,7 @@ func (a *App) handleUnregistry(c *gin.Context) {
 	})
 }
 
-// -------------------- playbook 选择 --------------------
-
-// findPlaybookFile 在 root 下查找 base.{yml,yaml}，返回路径 + 是否存在
-func findPlaybookFile(root, base string) (string, bool) {
-	ymlPath := filepath.Join(root, base+".yml")
-	yamlPath := filepath.Join(root, base+".yaml")
-
-	ymlExists := fileExists(ymlPath)
-	yamlExists := fileExists(yamlPath)
-
-	// 策略：如果同时存在，优先 yml
-	if ymlExists {
-		return ymlPath, true
-	}
-	if yamlExists {
-		return yamlPath, true
-	}
-	return "", false
-}
-
-func selectPlaybook(root, hostgroup string) (playbook string, warn string, err error) {
-	def, defExists := findPlaybookFile(root, "default")
-	hg, hgExists := findPlaybookFile(root, hostgroup)
-
-	switch {
-	case defExists && !hgExists:
-		return def,
-			fmt.Sprintf("hostgroup playbook missing: %s.{yml|yaml}; fallback to default", hostgroup),
-			nil
-
-	case !defExists && hgExists:
-		return hg, "", nil
-
-	case defExists && hgExists:
-		return hg,
-			"both default and hostgroup playbook exist; prefer hostgroup",
-			nil
-
-	default:
-		return "",
-			"",
-			fmt.Errorf("no playbook found for hostgroup %s under %s (tried .yml/.yaml)", hostgroup, root)
-	}
-}
-
-func fileExists(p string) bool {
-	st, err := os.Stat(p)
-	return err == nil && !st.IsDir()
-}
-
-// -------------------- 命令执行 & 流式输出 --------------------
+// --- 业务辅助函数 ---
 
 func (a *App) runAndStream(
 	ctx context.Context,
@@ -452,6 +378,7 @@ func (a *App) runAndStream(
 
 	cmd := exec.CommandContext(c, "/bin/bash", "-lc", shellCmd)
 
+	// 传递额外环境变量
 	if len(a.cfg.Exec.Env) > 0 {
 		cmd.Env = append(os.Environ(), a.cfg.Exec.Env...)
 	}
@@ -464,11 +391,11 @@ func (a *App) runAndStream(
 	if err != nil {
 		return err
 	}
-
 	if err := cmd.Start(); err != nil {
 		return err
 	}
 
+	// 合并两路输出并保持行级刷新
 	merge := func(r io.Reader, prefix string) error {
 		s := bufio.NewScanner(r)
 		s.Buffer(make([]byte, 0, 64*1024), 10*1024*1024)
@@ -481,6 +408,7 @@ func (a *App) runAndStream(
 		return s.Err()
 	}
 
+	// 并发读取 stdout/stderr
 	done := make(chan error, 2)
 	go func() { done <- merge(stdout, "[OUT]") }()
 	go func() { done <- merge(stderr, "[ERR]") }()
@@ -498,5 +426,6 @@ func (a *App) runAndStream(
 		}
 		return err
 	}
+
 	return nil
 }
