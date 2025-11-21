@@ -136,8 +136,12 @@ func main() {
 		IdleTimeout:  mustDur(cfg.Server.IdleTimeout, 120*time.Second),
 	}
 
-	log.Printf("ansible-gateway listening on %s", cfg.Server.Addr)
-	log.Fatal(server.ListenAndServe())
+	log.Printf("[INFO] ansible-gateway listening on %s", cfg.Server.Addr)
+
+	if err := server.ListenAndServe(); err != nil && !errors.Is(err, http.ErrServerClosed) {
+		log.Fatalf("[ERR ] server.ListenAndServe: %v", err)
+	}
+
 }
 
 // 初始化 / 重新打开日志文件
