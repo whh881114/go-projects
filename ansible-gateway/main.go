@@ -302,9 +302,9 @@ func (a *App) registerHost(c *gin.Context) {
 
 	playbookCmd := fmt.Sprintf(
 		"cd %s && ansible-playbook %s -i %s -e hosts=%s 2>&1 | tee %s",
-		a.cfg.Ansible.PlaybookRoot, playbook, invPath, hostgroup, logFile,
+		a.cfg.Ansible.Dir, playbook, invPath, hostgroup, logFile,
 	)
-	if err := a.runAndStream(ctx, playbookCmd, mustDur(a.cfg.Exec.PlaybookTimeout, 2*time.Hour), w, logf); err != nil {
+	if err := a.runAndStream(ctx, playbookCmd, 0, w, logf); err != nil {
 		http.Error(w, "playbook step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
