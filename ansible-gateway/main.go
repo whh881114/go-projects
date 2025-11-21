@@ -12,9 +12,12 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"os/signal"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"syscall"
 	"time"
 
 	"github.com/gin-gonic/gin"
@@ -65,10 +68,35 @@ type App struct {
 	rdb *redis.Client
 }
 
+// 全局日志文件状态（用于 SIGUSR1 轮转）
+var (
+	logFile     *os.File
+	logFilePath string
+)
+
 // 主程序
 func main() {
 	cfgPath := flag.String("config", "./config.yaml", "path to config file")
+	logPath := flag.String("logfile", "", "path to log file (empty=stderr)")
+	pidPath := flag.String("pidfile", "", "path to pid file")
 	flag.Parse()
+
+	// 日志初始化：如果指定了 logfile，就把 log 输出导向文件
+	if err := setupLog(*logPath); err != nil {
+		log.Fatalf("setup log: %v", err)
+	}
+
+	// 写 pidfile（nginx 同款风格）
+	if *pidPath != "" {
+		if err := os.WriteFile(*pidPath, []byte(strconv.Itoa(os.Getpid())+"\n"), 0o644); err != nil {
+			log.Fatalf("write pidfile: %v", err)
+		}
+	}
+
+	// 监听 SIGUSR1：收到后重开日志文件，配合 logrotate 的 postrotate
+	if *logPath != "" {
+		go handleLogReopen()
+	}
 
 	cfg, err := loadConfig(*cfgPath)
 	if err != nil {
@@ -110,6 +138,58 @@ func main() {
 
 	log.Printf("ansible-gateway listening on %s", cfg.Server.Addr)
 	log.Fatal(server.ListenAndServe())
+}
+
+// 初始化 / 重新打开日志文件
+func setupLog(path string) error {
+	// 空路径：保留默认行为（stderr），方便开发调试
+	if path == "" {
+		logFilePath = ""
+		logFile = nil
+		log.SetOutput(os.Stderr)
+		return nil
+	}
+
+	// 确保目录存在
+	dir := filepath.Dir(path)
+	if dir != "" && dir != "." {
+		if err := os.MkdirAll(dir, 0o755); err != nil {
+			return fmt.Errorf("mkdir log dir: %w", err)
+		}
+	}
+
+	// 打开新文件
+	f, err := os.OpenFile(path, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0o640)
+	if err != nil {
+		return fmt.Errorf("open log file: %w", err)
+	}
+
+	// 关闭旧文件（如果有）
+	if logFile != nil {
+		_ = logFile.Close()
+	}
+
+	logFile = f
+	logFilePath = path
+	log.SetOutput(f)
+	return nil
+}
+
+// 处理 SIGUSR1：重开日志文件，配合 logrotate
+func handleLogReopen() {
+	ch := make(chan os.Signal, 1)
+	signal.Notify(ch, syscall.SIGUSR1)
+	for range ch {
+		if logFilePath == "" {
+			continue
+		}
+		if err := setupLog(logFilePath); err != nil {
+			// 这里不能用 log.Printf（可能已经坏了），直接写 stderr
+			fmt.Fprintf(os.Stderr, "reopen log file on SIGUSR1 failed: %v\n", err)
+		} else {
+			log.Printf("log file reopened on SIGUSR1")
+		}
+	}
 }
 
 // 配置加载

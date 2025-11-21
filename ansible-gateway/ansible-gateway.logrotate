@@ -1,4 +1,4 @@
-/data/ansible-gateway/ansible-gateway.log {
+/var/log/ansible-gateway.log {
     daily               # 每天轮转
     rotate 7            # 保留 7 个历史文件
     missingok           # 没文件也别报错
