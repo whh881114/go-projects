@@ -146,6 +146,18 @@ func validate(req HostReq) error {
 	return nil
 }
 
+// 时间函数
+func mustDur(s string, d time.Duration) time.Duration {
+	if s == "" || s == "0" {
+		return d
+	}
+	v, err := time.ParseDuration(s)
+	if err != nil {
+		return d
+	}
+	return v
+}
+
 // ansible playbook相关函数
 func fileExists(p string) bool {
 	st, err := os.Stat(p)
@@ -186,7 +198,7 @@ func selectPlaybook(dir, hostgroup string) (playbook, warn string, err error) {
 		return hg, "both default and hostgroup exist; prefer hostgroup", nil
 
 	default:
-		return "", "", fmt.Errorf("neither default nor hostgroup playbook exists under %s (tried .yml/.yaml)", root)
+		return "", "", fmt.Errorf("neither default nor hostgroup playbook exists under %s (tried .yml/.yaml)", dir)
 	}
 }
 
