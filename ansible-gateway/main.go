@@ -291,7 +291,7 @@ func (a *App) registerHost(c *gin.Context) {
 		a.cfg.Ansible.User, req.IP, invPath, req.Hostname,
 	)
 	// timeout=0，等ansible命令执行完或执行过程中报错
-	if err := a.runAndStream(ctx, hostnameCmd, 0, w, logf); err != nil {
+	if err := a.runAndStream(ctx, hostnameCmd, w, logf); err != nil {
 		http.Error(w, "hostname step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -304,7 +304,7 @@ func (a *App) registerHost(c *gin.Context) {
 		"cd %s && ansible-playbook %s -i %s -e hosts=%s 2>&1 | tee %s",
 		a.cfg.Ansible.Dir, playbook, invPath, hostgroup, logFile,
 	)
-	if err := a.runAndStream(ctx, playbookCmd, 0, w, logf); err != nil {
+	if err := a.runAndStream(ctx, playbookCmd, w, logf); err != nil {
 		http.Error(w, "playbook step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -348,30 +348,12 @@ func (a *App) unregisterHost(c *gin.Context) {
 	})
 }
 
-// --- 业务辅助函数 ---
-
-func (a *App) runAndStream(
-	ctx context.Context,
-	shellCmd string,
-	timeout time.Duration,
-	w http.ResponseWriter,
-	logf func(string, ...any),
-) error {
+// 封闭执行shell命令函数
+func (a *App) runAndStream(ctx context.Context, shellCmd string, w http.ResponseWriter, logf func(string, ...any)) error {
 	logf("[INFO] run: %s", shellCmd)
 
 	c := ctx
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		c, cancel = context.WithTimeout(ctx, timeout)
-		defer cancel()
-	}
-
 	cmd := exec.CommandContext(c, "/bin/bash", "-lc", shellCmd)
-
-	// 传递额外环境变量
-	if len(a.cfg.Exec.Env) > 0 {
-		cmd.Env = append(os.Environ(), a.cfg.Exec.Env...)
-	}
 
 	stdout, err := cmd.StdoutPipe()
 	if err != nil {
