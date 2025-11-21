@@ -16,7 +16,7 @@ WorkingDirectory=/data/ansible-gateway
 #   -config   指定 config.yaml
 #   -logfile  指定日志文件路径
 #   -pidfile  指定 PID 文件
-ExecStart=/data/ansible-gateway/ansible-gateway-linux-amd6 \
+ExecStart=/data/ansible-gateway/ansible-gateway-linux-amd64 \
     -config /data/ansible-gateway/config.yaml \
     -logfile /var/log/ansible-gateway.log \
     -pidfile /run/ansible-gateway.pid
