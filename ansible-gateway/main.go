@@ -324,21 +324,21 @@ func (a *App) unregisterHost(c *gin.Context) {
 		c.String(http.StatusBadRequest, "invalid json")
 		return
 	}
-	if req.Hostname == "" {
-		c.String(http.StatusBadRequest, "missing hostname")
+	// 复用和 register 一样的校验逻辑：ID / Hostname / IP 都必填且格式正确
+	if err := validate(req); err != nil {
+		c.String(http.StatusBadRequest, err.Error())
 		return
 	}
 
 	lockKey := "LOCK__" + req.Hostname
 	ctx := c.Request.Context()
 
-	if req.ID != "" || req.IP != "" {
-		incoming := strings.Trim(req.ID+"__"+req.IP, "_")
-		stored, _ := a.rdb.HGet(ctx, lockKey, "id__ip").Result()
-		if stored != incoming {
-			c.String(http.StatusPreconditionFailed, "mismatch: stored=%q incoming=%q", stored, incoming)
-			return
-		}
+	// 必须和 Redis 里存的一致才允许删除
+	incoming := req.ID + "__" + req.IP
+	stored, _ := a.rdb.HGet(ctx, lockKey, "id__ip").Result()
+	if stored != incoming {
+		c.String(http.StatusPreconditionFailed, "mismatch: stored=%q incoming=%q", stored, incoming)
+		return
 	}
 
 	_, _ = a.rdb.Del(ctx, lockKey).Result()
