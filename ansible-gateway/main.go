@@ -314,10 +314,18 @@ func (a *App) registerHost(c *gin.Context) {
 		return
 	}
 
-	// 直接使用标准库 log，带时间戳；logf 只是包装一下做 flush
-	logger := log.New(w, "", log.LstdFlags|log.Lmicroseconds)
+	// logf：双写到日志文件 + HTTP 响应
 	logf := func(format string, args ...any) {
-		logger.Printf(format, args...)
+		msg := fmt.Sprintf(format, args...)
+		// 写到全局 logger（文件/stderr）
+		log.Println(msg)
+		// 再写回客户端，补一个时间戳，和你控制台里看到的一样
+		fmt.Fprintf(
+			w,
+			"%s %s\n",
+			time.Now().Format("2006/01/02 15:04:05.000000"),
+			msg,
+		)
 		flusher.Flush()
 	}
 
@@ -331,6 +339,7 @@ func (a *App) registerHost(c *gin.Context) {
 	okSet, err := a.rdb.HSetNX(ctx, lockKey, "id__ip", val).Result()
 
 	if err != nil {
+		log.Printf("[ERROR] redis HSetNX failed: %v", err)
 		http.Error(w, "redis error: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -359,6 +368,7 @@ func (a *App) registerHost(c *gin.Context) {
 		logf("[WARN] %s", warn)
 	}
 	if err != nil {
+		log.Printf("[ERROR] selectPlaybook failed: %v", err)
 		http.Error(w, "playbook select error: "+err.Error(), http.StatusNotFound)
 		return
 	}
@@ -366,12 +376,14 @@ func (a *App) registerHost(c *gin.Context) {
 
 	// 写 inventory 文件
 	if err := os.MkdirAll(a.cfg.Ansible.Log, 0o755); err != nil {
+		log.Printf("[ERROR] mkdir log_dir failed: %v", err)
 		http.Error(w, "mkdir log_dir: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
 	invBase := fmt.Sprintf("%s__%s__%s.txt", req.ID, req.Hostname, req.IP)
 	invPath := filepath.Join(a.cfg.Ansible.Log, invBase)
 	if err := os.WriteFile(invPath, []byte("["+hostgroup+"]\n"+req.IP+"\n"), 0o644); err != nil {
+		log.Printf("[ERROR] write inventory failed: %v", err)
 		http.Error(w, "write inventory: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -384,6 +396,7 @@ func (a *App) registerHost(c *gin.Context) {
 	)
 	// timeout=0，等ansible命令执行完或执行过程中报错
 	if err := a.runAndStream(ctx, hostnameCmd, w, logf); err != nil {
+		log.Printf("[ERROR] hostname step failed: %v", err)
 		http.Error(w, "hostname step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -397,6 +410,7 @@ func (a *App) registerHost(c *gin.Context) {
 		a.cfg.Ansible.Dir, playbook, invPath, hostgroup, logFile,
 	)
 	if err := a.runAndStream(ctx, playbookCmd, w, logf); err != nil {
+		log.Printf("[ERROR] playbook step failed: %v", err)
 		http.Error(w, "playbook step failed: "+err.Error(), http.StatusInternalServerError)
 		return
 	}
@@ -429,11 +443,13 @@ func (a *App) unregisterHost(c *gin.Context) {
 	incoming := req.ID + "__" + req.IP
 	stored, _ := a.rdb.HGet(ctx, lockKey, "id__ip").Result()
 	if stored != incoming {
+		log.Printf("[WARN] unregister mismatch: stored=%q incoming=%q", stored, incoming)
 		c.String(http.StatusPreconditionFailed, "mismatch: stored=%q incoming=%q", stored, incoming)
 		return
 	}
 
 	_, _ = a.rdb.Del(ctx, lockKey).Result()
+	log.Printf("[INFO] unregister ok: %s", lockKey)
 	c.JSON(http.StatusOK, map[string]any{
 		"ok":      true,
 		"deleted": lockKey,
