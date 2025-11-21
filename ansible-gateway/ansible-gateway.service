@@ -1,0 +1,37 @@
+[Unit]
+Description=Ansible Gateway
+After=network.target
+
+[Service]
+Type=simple
+
+# 推荐建一个专用用户，先用 root 也行
+User=root
+Group=root
+
+# 程序所在目录
+WorkingDirectory=/data/ansible-gateway
+
+# 假设你给程序加了这些参数：
+#   -config   指定 config.yaml
+#   -logfile  指定日志文件路径
+#   -pidfile  指定 PID 文件
+ExecStart=/data/ansible-gateway/ansible-gateway-linux-amd6 \
+    -config /data/ansible-gateway/config.yaml \
+    -logfile /data/ansible-gateway/ansible-gateway.log \
+    -pidfile /run/ansible-gateway.pid
+
+# 挂了自动拉起
+Restart=on-failure
+RestartSec=3s
+
+# 让 systemd 知道 pidfile 位置（可选，但推荐）
+PIDFile=/run/ansible-gateway.pid
+
+# 不再用 StandardOutput 重定向到文件
+# 让程序自己写日志到 -logfile 指定的路径
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

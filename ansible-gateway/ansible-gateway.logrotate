@@ -1,0 +1,13 @@
+/data/ansible-gateway/ansible-gateway.log {
+    daily               # 每天轮转
+    rotate 7            # 保留 7 个历史文件
+    missingok           # 没文件也别报错
+    notifempty          # 空文件不轮转
+    create 0640 root root
+    sharedscripts
+
+    postrotate
+        # 向 ansible-gateway 进程发 USR1 信号，让它重新打开日志文件
+        /bin/kill -USR1 `cat /run/ansible-gateway.pid 2>/dev/null` 2>/dev/null || true
+    endscript
+}
